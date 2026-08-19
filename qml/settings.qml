@@ -8,7 +8,7 @@ import ClassWidgets.Plugins
 // 随机点名主程序设置页（参考 TTS 服务插件设计：PluginPage + SettingCard）
 PluginPage {
     id: root
-    pluginId: "com.kryon.rollcall"
+    pluginId: "com.rollcall"
     title: "随机点名"
 
     property bool visibleValue: true
