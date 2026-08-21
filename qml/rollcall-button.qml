@@ -46,8 +46,12 @@ Window {
                 var dy = mouse.y - _dragY
                 if (Math.abs(dx) > 4 || Math.abs(dy) > 4) _dragging = true
                 if (_dragging) {
-                    buttonWin.x = buttonWin.x + dx
-                    buttonWin.y = buttonWin.y + dy
+                    var nx = buttonWin.x + dx
+                    var ny = buttonWin.y + dy
+                    // 钳制在屏幕可用区域内，避免拖出屏幕后找不到按钮
+                    var scr = Screen.availableVirtualGeometry
+                    buttonWin.x = Math.max(scr.x, Math.min(nx, scr.x + scr.width - buttonWin.width))
+                    buttonWin.y = Math.max(scr.y, Math.min(ny, scr.y + scr.height - buttonWin.height))
                 }
             }
             onReleased: {

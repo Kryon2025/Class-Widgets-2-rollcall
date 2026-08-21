@@ -41,9 +41,10 @@ class RollConfig(BaseModel):
     animation_seconds: int = 3     # 点名滚动动画时长（秒）
 
 
-# 序号前缀：1. / 1、 / 1） / (1) / 1． / 01 / [1] / 第3名
+# 序号前缀：1. / 1、 / 1） / (1) / 1． / [1] / 第3名 / 5 张三
+# 纯数字后必须带标点或空格才算序号，避免把"3班"这类姓名误当序号删除
 _ORDER_PREFIX = re.compile(
-    r"^\s*(?:\(\d+\)|\[\d+\]|\d+\s*[.．、:：)）]?|第\s*\d+\s*名)\s*"
+    r"^\s*(?:\(\d+\)|\[\d+\]|\d+\s*[.．、:：)）]\s*|\d+\s+(?=\S)|第\s*\d+\s*名)\s*"
 )
 
 # 行内分隔符：逗号 / 顿号 / 分号 / 制表符 / 连续空格（兼容一行多个名字）
@@ -78,6 +79,8 @@ def _read_docx_text(path: Path) -> str:
     paras = re.findall(r"<w:p\b[^>]*>.*?</w:p>", xml, re.S)
     lines = []
     for p in paras:
+        # 软换行 <w:br/> 转成含换行的伪文本节点，避免同一段落内多个名字被拼成一个
+        p = re.sub(r"<w:br\s*/?>", "<w:t>\\n</w:t>", p)
         text = "".join(re.findall(r"<w:t[^>]*>(.*?)</w:t>", p, re.S))
         if text:
             lines.append(text)
@@ -296,8 +299,9 @@ class Plugin(CW2Plugin):
             qml_dir = Path(__file__).resolve().parent / "qml"
             for name in ("rollcall-button.qml", "rollcall-menu.qml", "rollcall-result.qml"):
                 engine.load(QUrl.fromLocalFile(str(qml_dir / name)))
-            if not engine.rootObjects():
-                logger.error("[rollcall] 悬浮窗 QML 加载失败")
+            loaded = len(engine.rootObjects())
+            if loaded < 3:
+                logger.error(f"[rollcall] 悬浮窗 QML 加载不完整：{loaded}/3")
                 engine.deleteLater()
                 self._engine = None
                 return
@@ -317,6 +321,8 @@ class Plugin(CW2Plugin):
             logger.info(f"[rollcall] 悬浮窗已创建（{len(self._windows)} 个）")
         except Exception as e:
             logger.error(f"[rollcall] 创建悬浮窗失败: {e}")
+            if engine is not None:
+                engine.deleteLater()
             self._engine = None
 
     def _apply_window_pos(self, win, x: int, y: int) -> None:
@@ -398,7 +404,9 @@ class Plugin(CW2Plugin):
         try:
             if self._roster_file.exists():
                 data = json.loads(self._roster_file.read_text(encoding="utf-8"))
-                self._roster = [str(n) for n in (data or [])]
+                # 只接受非空字符串，避免损坏数据产生空项/非字符串项
+                self._roster = [n.strip() for n in (data or [])
+                                if isinstance(n, str) and n.strip()]
                 self._reset_shuffle()
         except Exception:
             self._roster = []

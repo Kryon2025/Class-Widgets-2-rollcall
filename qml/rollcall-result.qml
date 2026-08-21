@@ -172,6 +172,11 @@ Window {
         function onRollRequested(n) { startRoll(n) }
     }
 
+    // 窗口被关闭/隐藏（如点系统 X）时立即停止滚动，保证下次点名不被吞掉
+    onVisibleChanged: {
+        if (!visible) resultWin.stopRoll()
+    }
+
     // 拖动结束后防抖保存位置（重启自动恢复）
     Timer {
         id: posSaveTimer
