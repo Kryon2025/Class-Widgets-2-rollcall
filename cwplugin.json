@@ -6,7 +6,7 @@
   "entry": "main.py",
   "author": "松峰",
   "description": "随机点名：独立悬浮窗（非桌面组件），可拖动、可调大小；支持 txt / Word 名单导入，自动去除“1.小明”式序号。(此插件由Deepseek V4 Flash编写)",
-  "url": "https://github.com/Kryon2025/Class-Widgets-2-rollcall.git",
+  "url": "https://github.com/Kryon2025/Class-Widgets-2-rollcall",
   "readme": "README.md",
   "icon": "icon.png"
 }
