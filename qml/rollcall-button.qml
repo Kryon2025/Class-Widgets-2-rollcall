@@ -10,9 +10,13 @@ import QtQuick.Window
 //         否则切换配置时会把已收起的按钮重新弹出来。
 // 注意 2：**不要**使用 Qt.WindowDoesNotAcceptFocus。该标志（WS_EX_NOACTIVATE）
 //         会让窗口收不到鼠标点击，按钮既拖不动也点不出菜单。
-// 注意 3：两个菜单都用 popupType: Popup.Window —— 按钮窗口只有 60x44，
-//         Item 类型的 Popup 会被窗口边界裁掉；Window 类型可超出且由 Qt 自动
-//         处理屏幕边缘，不需要自己算坐标。
+// 注意 3：两个菜单用**普通 Window**（而非 Popup）承载，并沿用与按钮完全相同的
+//         窗口标志。原因：Popup 会被 Qt 建为不可激活的 Qt::Popup 窗口，
+//         Windows 不会把触摸手势提升为点击事件送进去，表现为「鼠标能点、
+//         手指点不动二级菜单」。普通 Window 可激活，触摸与鼠标都能正常响应；
+//         另外按钮窗口只有 60x44，Item 型 Popup 还会被窗口边界裁掉。
+// 注意 4：菜单改为独立窗口后，点击别处不再由 CloseOnPressOutside 处理，
+//         改由「失去激活」自动收起（见 onActiveChanged）。
 
 Window {
     id: buttonWin
@@ -66,9 +70,9 @@ Window {
             cursorShape: buttonWin._dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
             onPressed: function (m) {
-                // 菜单打开时先收起：Popup.Window 会抓取鼠标，干扰拖动坐标换算
-                if (countPanel.opened) countPanel.close()
-                if (quickPanel.opened) quickPanel.close()
+                // 菜单打开时先收起，避免菜单盖住按钮导致误操作
+                countPanel.closeMenu()
+                quickPanel.closeMenu()
                 var g = mouse.mapToGlobal(m.x, m.y)
                 buttonWin._grabX = g.x - buttonWin.x
                 buttonWin._grabY = g.y - buttonWin.y
@@ -104,99 +108,121 @@ Window {
                     return
                 }
                 if (m.button === Qt.RightButton)
-                    quickPanel.open()
+                    quickPanel.openMenu()
                 else
-                    countPanel.open()
+                    countPanel.openMenu()
             }
         }
     }
 
     // ── 人数菜单（左键）──────────────────────────────────────
-    Popup {
+    // 普通 Window：可激活，触摸与鼠标都能收到；位置由 reposition() 按屏幕边缘翻转
+    Window {
         id: countPanel
-        popupType: Popup.Window
+        objectName: "countPanel"
         width: 224
-        padding: 10
-        modal: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        x: buttonWin.width + 4
-        y: 0
+        height: countLayout.implicitHeight + 20
+        visible: false
+        color: "transparent"
+        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+
+        // 相对于按钮做屏幕边缘翻转，避免菜单重叠按钮或超出屏幕
+        function reposition() {
+            var px = buttonWin.x + buttonWin.width + 4
+            var py = buttonWin.y
+            // 沿用作者原来的 Screen API：应用内的 Qt 版本支持它；
+            // 若该成员不存在则得到 undefined，下面的守卫会跳过翻转，不会抛错
+            var scr = Screen.availableVirtualGeometry
+            if (scr && scr.width > 0 && scr.height > 0) {
+                if (px + width > scr.x + scr.width)
+                    px = buttonWin.x - width - 4
+                if (py + height > scr.y + scr.height)
+                    py = buttonWin.y + buttonWin.height - height
+                px = Math.max(scr.x, Math.min(px, scr.x + scr.width - 8))
+                py = Math.max(scr.y, Math.min(py, scr.y + scr.height - 8))
+            }
+            x = px
+            y = py
+        }
+
+        function openMenu() {
+            reposition()
+            visible = true
+            requestActivate()
+        }
+
+        function closeMenu() {
+            visible = false
+        }
+
+        // 点击别处 → 窗口失去激活 → 自动收起（替代 Popup 的 CloseOnPressOutside）
+        onActiveChanged: if (!active && visible) closeMenu()
+        onClosing: visible = false
 
         function choose(n) {
-            close()
+            closeMenu()
             if (backend)
                 backend.requestRoll(n)
         }
 
-        // 打开后再定位：靠屏幕边缘时翻转到按钮另一侧，避免重叠或超出屏幕
-        onOpened: {
-            try {
-                var scr = Screen.availableVirtualGeometry
-                if (scr.width > 0 && buttonWin.x + buttonWin.width + 4 + width > scr.x + scr.width)
-                    x = -width - 4
-                else
-                    x = buttonWin.width + 4
-                if (scr.height > 0 && buttonWin.y + height > scr.y + scr.height)
-                    y = buttonWin.height - height
-                else
-                    y = 0
-            } catch (e) {}
-        }
-
-        background: Rectangle {
+        Rectangle {
+            id: countRoot
+            anchors.fill: parent
             radius: 14
             color: "#F21E1E1E"
             border.width: 1
             border.color: "#33FFFFFF"
-        }
 
-        contentItem: ColumnLayout {
-            spacing: 5
+            ColumnLayout {
+                id: countLayout
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 5
 
-            Text {
-                text: "抽取人数"
-                color: "#8CFFFFFF"
-                font.pixelSize: 10
-                Layout.leftMargin: 4
-            }
+                Text {
+                    text: "抽取人数"
+                    color: "#8CFFFFFF"
+                    font.pixelSize: 10
+                    Layout.leftMargin: 4
+                }
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 6
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
 
-                Repeater {
-                    model: [1, 2, 3]
+                    Repeater {
+                        model: [1, 2, 3]
 
-                    delegate: Rectangle {
-                        required property int modelData
+                        delegate: Rectangle {
+                            required property int modelData
 
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 34
-                        radius: 10
-                        color: cmouse.pressed ? "#505A8F"
-                               : (cmouse.containsMouse ? "#40405A8F" : "#1AFFFFFF")
-                        border.width: 1
-                        border.color: cmouse.containsMouse ? "#805A9BFF" : "#22FFFFFF"
-                        scale: cmouse.pressed ? 0.96 : 1.0
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 34
+                            radius: 10
+                            color: cmouse.pressed ? "#505A8F"
+                                   : (cmouse.containsMouse ? "#40405A8F" : "#1AFFFFFF")
+                            border.width: 1
+                            border.color: cmouse.containsMouse ? "#805A9BFF" : "#22FFFFFF"
+                            scale: cmouse.pressed ? 0.96 : 1.0
 
-                        Behavior on color { ColorAnimation { duration: 90 } }
-                        Behavior on scale { NumberAnimation { duration: 90 } }
+                            Behavior on color { ColorAnimation { duration: 90 } }
+                            Behavior on scale { NumberAnimation { duration: 90 } }
 
-                        Text {
-                            anchors.centerIn: parent
-                            text: modelData + " 名"
-                            color: cmouse.containsMouse ? "#FFFFFF" : "#E6FFFFFF"
-                            font.bold: true
-                            font.pixelSize: 14
-                        }
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData + " 名"
+                                color: cmouse.containsMouse ? "#FFFFFF" : "#E6FFFFFF"
+                                font.bold: true
+                                font.pixelSize: 14
+                            }
 
-                        MouseArea {
-                            id: cmouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: countPanel.choose(modelData)
+                            MouseArea {
+                                id: cmouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: countPanel.choose(modelData)
+                            }
                         }
                     }
                 }
@@ -205,85 +231,105 @@ Window {
     }
 
     // ── 快捷设置面板（右键）──────────────────────────────────
-    Popup {
+    Window {
         id: quickPanel
-        popupType: Popup.Window
+        objectName: "quickPanel"
         width: 208
-        padding: 10
-        modal: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        x: buttonWin.width + 6
-        y: 0
+        height: quickLayout.implicitHeight + 20
+        visible: false
+        color: "transparent"
+        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
 
-        onOpened: {
-            try {
-                var scr = Screen.availableVirtualGeometry
-                if (scr.width > 0 && buttonWin.x + buttonWin.width + 6 + width > scr.x + scr.width)
-                    x = -width - 6
-                else
-                    x = buttonWin.width + 6
-                if (scr.height > 0 && buttonWin.y + height > scr.y + scr.height)
-                    y = buttonWin.height - height
-                else
-                    y = 0
-            } catch (e) {}
+        function reposition() {
+            var px = buttonWin.x + buttonWin.width + 6
+            var py = buttonWin.y
+            // 沿用作者原来的 Screen API：应用内的 Qt 版本支持它；
+            // 若该成员不存在则得到 undefined，下面的守卫会跳过翻转，不会抛错
+            var scr = Screen.availableVirtualGeometry
+            if (scr && scr.width > 0 && scr.height > 0) {
+                if (px + width > scr.x + scr.width)
+                    px = buttonWin.x - width - 6
+                if (py + height > scr.y + scr.height)
+                    py = buttonWin.y + buttonWin.height - height
+                px = Math.max(scr.x, Math.min(px, scr.x + scr.width - 8))
+                py = Math.max(scr.y, Math.min(py, scr.y + scr.height - 8))
+            }
+            x = px
+            y = py
         }
 
-        background: Rectangle {
+        function openMenu() {
+            reposition()
+            visible = true
+            requestActivate()
+        }
+
+        function closeMenu() {
+            visible = false
+        }
+
+        onActiveChanged: if (!active && visible) closeMenu()
+        onClosing: visible = false
+
+        Rectangle {
+            id: quickRoot
+            anchors.fill: parent
             radius: 12
             color: "#F21E1E1E"
             border.width: 1
             border.color: "#33FFFFFF"
-        }
 
-        contentItem: ColumnLayout {
-            spacing: 6
+            ColumnLayout {
+                id: quickLayout
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 6
 
-            Text {
-                text: "快捷设置"
-                color: "#9FFFFFFF"
-                font.pixelSize: 11
-                Layout.bottomMargin: 2
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                Text { text: "浮窗模式"; color: "white"; font.pixelSize: 12; Layout.fillWidth: true }
-                Switch {
-                    checked: backend ? backend.floatMode : true
-                    onToggled: if (backend) backend.setFloatMode(checked)
+                Text {
+                    text: "快捷设置"
+                    color: "#9FFFFFFF"
+                    font.pixelSize: 11
+                    Layout.bottomMargin: 2
                 }
-            }
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                Text { text: "点击后隐藏"; color: "white"; font.pixelSize: 12; Layout.fillWidth: true }
-                Switch {
-                    checked: backend ? backend.clickHide : false
-                    onToggled: if (backend) backend.setClickHide(checked)
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                Button {
+                RowLayout {
                     Layout.fillWidth: true
-                    text: "收起按钮"
-                    onClicked: {
-                        quickPanel.close()
-                        if (backend) backend.hideButton()
+                    spacing: 8
+                    Text { text: "浮窗模式"; color: "white"; font.pixelSize: 12; Layout.fillWidth: true }
+                    Switch {
+                        checked: backend ? backend.floatMode : true
+                        onToggled: if (backend) backend.setFloatMode(checked)
                     }
                 }
-                Button {
+
+                RowLayout {
                     Layout.fillWidth: true
-                    text: "设置页"
-                    onClicked: {
-                        quickPanel.close()
-                        if (backend) backend.openSettings()
+                    spacing: 8
+                    Text { text: "点击后隐藏"; color: "white"; font.pixelSize: 12; Layout.fillWidth: true }
+                    Switch {
+                        checked: backend ? backend.clickHide : false
+                        onToggled: if (backend) backend.setClickHide(checked)
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Button {
+                        Layout.fillWidth: true
+                        text: "收起按钮"
+                        onClicked: {
+                            quickPanel.closeMenu()
+                            if (backend) backend.hideButton()
+                        }
+                    }
+                    Button {
+                        Layout.fillWidth: true
+                        text: "设置页"
+                        onClicked: {
+                            quickPanel.closeMenu()
+                            if (backend) backend.openSettings()
+                        }
                     }
                 }
             }
