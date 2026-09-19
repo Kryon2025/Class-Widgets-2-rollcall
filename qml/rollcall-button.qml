@@ -121,6 +121,8 @@ Window {
         visible: false
         color: "transparent"
         flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        // 是否在上课；非上课期间不显示"隐藏"按钮
+        property bool inClass: true
 
         // 相对于按钮做屏幕边缘翻转，避免菜单重叠按钮或超出屏幕
         function reposition() {
@@ -144,6 +146,8 @@ Window {
         }
 
         function openMenu() {
+            // 上课期间才显示"隐藏"按钮；后端判不出来时会返回 true，照旧显示
+            inClass = backend ? backend.isInClass() : true
             reposition()
             visible = true
             requestActivate()
@@ -226,8 +230,10 @@ Window {
                 }
 
                 // 隐藏：只收起窗口，不改配置；下课后由后端自动恢复显示
+                // 非上课期间整块不显示，菜单会自动缩到只有抽取人数那一行
                 Rectangle {
                     id: hideBtn
+                    visible: countPanel.inClass
                     Layout.fillWidth: true
                     Layout.preferredHeight: 30
                     radius: 10

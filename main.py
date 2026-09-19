@@ -55,6 +55,34 @@ class RollConfig(ConfigBaseModel):
     notify_duration: int = 4       # 灵动通知停留时长（秒）
 
 
+def _data_dir() -> Path:
+    """插件用户数据目录：<主程序根>/configs/plugins/<插件ID>。
+
+    不能写进插件自己的目录：覆盖更新会把 plugins/<插件ID>/ 整个替换掉，
+    .roll_*.json 跟着消失，用户就得重新导入名单、重新配权重。
+    configs/ 归主程序管，更新插件不会动它（com.kryon.automations 就是这么存的）。
+    """
+    try:
+        d = Path(__file__).resolve().parent.parent.parent / "configs" / "plugins" / "com.rollcall"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    except Exception:
+        return Path(__file__).resolve().parent
+
+
+def _data_file(name: str) -> Path:
+    """数据文件路径；顺带把旧版写在插件目录里的同名文件迁移一次。"""
+    old = Path(__file__).resolve().parent / name
+    new = _data_dir() / name
+    try:
+        if old.exists() and not new.exists():
+            new.parent.mkdir(parents=True, exist_ok=True)
+            new.write_bytes(old.read_bytes())
+    except Exception:
+        pass
+    return new
+
+
 # 序号前缀：1. / 1、 / 1） / (1) / 1． / [1] / 第3名 / 5 张三
 # 纯数字后必须带标点或空格才算序号，避免把"3班"这类姓名误当序号删除
 _ORDER_PREFIX = re.compile(
@@ -128,9 +156,9 @@ class Plugin(CW2Plugin):
         self._index = 0
         self._engine: QQmlApplicationEngine | None = None
         self._windows: list = []
-        self._roster_file = Path(__file__).resolve().parent / ".roll_roster.json"
-        self._weights_file = Path(__file__).resolve().parent / ".roll_weights.json"
-        self._pos_file = Path(__file__).resolve().parent / ".roll_pos.json"
+        self._roster_file = _data_file(".roll_roster.json")
+        self._weights_file = _data_file(".roll_weights.json")
+        self._pos_file = _data_file(".roll_pos.json")
         self._pos = self._default_pos()
         # 「本节课隐藏」的运行时状态：只收起窗口，不写 window_visible 配置
         self._lesson_hidden = False
@@ -167,6 +195,23 @@ class Plugin(CW2Plugin):
     @Slot(result=dict)
     def getConfig(self) -> dict:
         return self._config.model_dump()
+
+    @Slot(result=bool)
+    def isInClass(self) -> bool:
+        """当前是否在上课，供菜单决定"隐藏"按钮显示与否。
+
+        采取保守策略：**判不出来就返回 True**（照旧显示按钮）。
+        只有明确拿到"课间/空闲/放假"这类非上课状态时才隐藏，
+        避免按钮在不确定的情况下莫名消失、用户找不回来。
+        """
+        try:
+            st = str(getattr(self.api.runtime, "current_status", "") or "").strip().lower()
+        except Exception:
+            return True
+        if not st:
+            return True
+        not_class = ("break", "idle", "课间", "休息", "空闲", "放学", "假期", "放假")
+        return not any(k in st for k in not_class)
 
     @Slot(bool)
     def setWindowVisible(self, value: bool) -> None:
