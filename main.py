@@ -27,16 +27,21 @@ import zipfile
 from pathlib import Path
 
 from loguru import logger
-from pydantic import BaseModel
-from PySide6.QtCore import QUrl, Signal, Slot, Property
+from PySide6.QtCore import QPoint, QUrl, Signal, Slot, Property, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
-from ClassWidgets.SDK import CW2Plugin, PluginAPI
+from ClassWidgets.SDK import CW2Plugin, ConfigBaseModel, PluginAPI
 
 
-class RollConfig(BaseModel):
-    """插件配置（由主程序持久化）。"""
+class RollConfig(ConfigBaseModel):
+    """插件配置（由主程序持久化）。
+
+    必须继承 SDK 的 ConfigBaseModel，而不是 pydantic 的裸 BaseModel：
+    主程序在注册时会调用模型的 _bind_runtime_context 注入变更回调，
+    裸 BaseModel 没有这个方法，注册会失败，配置就完全不会被保存，
+    表现为「改了开关/时长，重启后又被重置」。
+    """
 
     window_visible: bool = True    # 按钮显示开关
     button_width: int = 52         # 按钮宽度
@@ -127,6 +132,13 @@ class Plugin(CW2Plugin):
         self._weights_file = Path(__file__).resolve().parent / ".roll_weights.json"
         self._pos_file = Path(__file__).resolve().parent / ".roll_pos.json"
         self._pos = self._default_pos()
+        # 「本节课隐藏」的运行时状态：只收起窗口，不写 window_visible 配置
+        self._lesson_hidden = False
+        self._lesson_key = None
+        self._lesson_timer = QTimer(self)
+        self._lesson_timer.setSingleShot(True)
+        self._lesson_timer.setInterval(60 * 60 * 1000)  # 兜底：最多隐藏一小时
+        self._lesson_timer.timeout.connect(self._restore_from_lesson_hide)
         self._load_roster()
         self._load_weights()
         self._load_pos()
@@ -141,10 +153,12 @@ class Plugin(CW2Plugin):
         except Exception as e:
             logger.warning(f"[rollcall] 注册配置模型失败: {e}")
         self._register_settings_page()
+        self._connect_runtime()
         if self._config.window_visible:
             self._create_windows()
 
     def on_unload(self):
+        self._disconnect_runtime()
         self._destroy_windows()
         super().on_unload()
 
@@ -386,6 +400,79 @@ class Plugin(CW2Plugin):
         """隐藏悬浮按钮（右键菜单 / 点击后隐藏共用）。"""
         self.setWindowVisible(False)
 
+    # ── 本节课隐藏 ────────────────────────────────────────────
+
+    @Slot()
+    def hideForLesson(self) -> None:
+        """本节课隐藏：按钮立刻收起，本节下课后自动恢复显示。
+
+        只收起窗口、不改 window_visible 配置，所以既不会「永久消失」，
+        也不会让主程序重启后按钮不出现；另有超时兜底，保证一定找得回来。
+        """
+        self._lesson_key = self._entry_key()
+        self._lesson_hidden = True
+        btn = self._find_window("buttonWin")
+        if btn is not None:
+            btn.setVisible(False)
+        self._lesson_timer.start()
+
+    def _entry_key(self):
+        """当前这一节课程的标识；空闲时段返回 None。"""
+        try:
+            entry = getattr(self.api.runtime, "current_entry", None)
+            if not entry:
+                return None
+            return f"{entry.get('id')}|{entry.get('endTime')}"
+        except Exception:
+            return None
+
+    def _restore_from_lesson_hide(self) -> None:
+        """恢复被「本节课隐藏」收起的按钮（也用作超时兜底）。"""
+        self._lesson_timer.stop()
+        self._lesson_hidden = False
+        self._lesson_key = None
+        if not self._config.window_visible:
+            return
+        btn = self._find_window("buttonWin")
+        if btn is not None:
+            btn.setVisible(True)
+
+    def _on_runtime_tick(self, *_args) -> None:
+        """上一节结束后恢复按钮：换节 / 下课都会让 current_entry 变化。"""
+        if not self._lesson_hidden:
+            return
+        if self._entry_key() != self._lesson_key:
+            self._restore_from_lesson_hide()
+
+    def _connect_runtime(self) -> None:
+        """监听主程序日程变化，用于「本节课隐藏」的自动恢复。"""
+        try:
+            rt = getattr(self.api, "runtime", None)
+            if rt is None:
+                return
+            for name in ("updated", "entryChanged", "statusChanged"):
+                sig = getattr(rt, name, None)
+                if sig is not None:
+                    sig.connect(self._on_runtime_tick)
+        except Exception as e:
+            logger.warning(f"[rollcall] 连接日程信号失败: {e}")
+
+    def _disconnect_runtime(self) -> None:
+        try:
+            rt = getattr(self.api, "runtime", None)
+            if rt is None:
+                return
+            for name in ("updated", "entryChanged", "statusChanged"):
+                sig = getattr(rt, name, None)
+                if sig is None:
+                    continue
+                try:
+                    sig.disconnect(self._on_runtime_tick)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     @Slot(result=bool)
     def openSettings(self) -> bool:
         """尝试打开主程序内的插件设置页。
@@ -517,6 +604,23 @@ class Plugin(CW2Plugin):
         for s in screens[1:]:
             geo = geo.united(s.availableGeometry())
         return geo
+
+    @Slot(int, int, result=dict)
+    def screenBounds(self, x: int, y: int) -> dict:
+        """返回坐标 (x, y) 所在屏幕的可用区域。
+
+        菜单定位用它来翻转/夹取位置：QML 的 Screen 附加属性在多屏和
+        不同 Qt 版本下并不一致（availableGeometry / availableVirtualGeometry
+        在部分版本上不存在），交给 Python 侧最稳。
+        """
+        try:
+            screen = QGuiApplication.screenAt(QPoint(int(x), int(y)))
+            if screen is None:
+                screen = QGuiApplication.primaryScreen()
+            geo = screen.availableGeometry()
+            return {"x": geo.left(), "y": geo.top(), "w": geo.width(), "h": geo.height()}
+        except Exception:
+            return {"x": 0, "y": 0, "w": 0, "h": 0}
 
     def _apply_window_pos(self, win, x: int, y: int) -> None:
         """设置窗口位置并把位置限制在**所有屏幕**的联合区域内。

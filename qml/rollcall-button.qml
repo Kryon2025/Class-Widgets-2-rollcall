@@ -4,13 +4,13 @@ import QtQuick.Layouts
 import QtQuick.Window
 
 // 点名小按钮（浮窗）
-// 左键点击 → 人数菜单；左键拖动 → 移动位置；右键 → 快捷设置面板
+// 左键点击 → 菜单（抽取人数 / 隐藏）；左键拖动 → 移动位置
 //
 // 注意 1：本窗口的 visible 完全由 Python 侧控制，QML 不做绑定，
 //         否则切换配置时会把已收起的按钮重新弹出来。
 // 注意 2：**不要**使用 Qt.WindowDoesNotAcceptFocus。该标志（WS_EX_NOACTIVATE）
 //         会让窗口收不到鼠标点击，按钮既拖不动也点不出菜单。
-// 注意 3：两个菜单用**普通 Window**（而非 Popup）承载，并沿用与按钮完全相同的
+// 注意 3：菜单用**普通 Window**（而非 Popup）承载，并沿用与按钮完全相同的
 //         窗口标志。原因：Popup 会被 Qt 建为不可激活的 Qt::Popup 窗口，
 //         Windows 不会把触摸手势提升为点击事件送进去，表现为「鼠标能点、
 //         手指点不动二级菜单」。普通 Window 可激活，触摸与鼠标都能正常响应；
@@ -66,13 +66,12 @@ Window {
         MouseArea {
             id: mouse
             anchors.fill: parent
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            acceptedButtons: Qt.LeftButton
             cursorShape: buttonWin._dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
             onPressed: function (m) {
                 // 菜单打开时先收起，避免菜单盖住按钮导致误操作
                 countPanel.closeMenu()
-                quickPanel.closeMenu()
                 var g = mouse.mapToGlobal(m.x, m.y)
                 buttonWin._grabX = g.x - buttonWin.x
                 buttonWin._grabY = g.y - buttonWin.y
@@ -102,15 +101,12 @@ Window {
                 }
             }
 
-            onReleased: function (m) {
+            onReleased: {
                 if (buttonWin._dragging) {
                     posSaveTimer.restart()
                     return
                 }
-                if (m.button === Qt.RightButton)
-                    quickPanel.openMenu()
-                else
-                    countPanel.openMenu()
+                countPanel.openMenu()
             }
         }
     }
@@ -128,18 +124,20 @@ Window {
 
         // 相对于按钮做屏幕边缘翻转，避免菜单重叠按钮或超出屏幕
         function reposition() {
+            // 屏幕可用区域交给后端查：QML 的 Screen 附加属性在部分 Qt 版本上
+            // 没有 availableGeometry/availableVirtualGeometry，之前正是因此
+            // 守卫直接跳过，按钮拖到最右边时菜单就跑到屏幕外面了。
+            var g = backend ? backend.screenBounds(buttonWin.x, buttonWin.y) : null
             var px = buttonWin.x + buttonWin.width + 4
             var py = buttonWin.y
-            // 沿用作者原来的 Screen API：应用内的 Qt 版本支持它；
-            // 若该成员不存在则得到 undefined，下面的守卫会跳过翻转，不会抛错
-            var scr = Screen.availableVirtualGeometry
-            if (scr && scr.width > 0 && scr.height > 0) {
-                if (px + width > scr.x + scr.width)
+            if (g && g.w > 0 && g.h > 0) {
+                // 右边放不下就翻到按钮左侧，再整体夹进屏幕，保证一定看得见
+                if (px + width > g.x + g.w)
                     px = buttonWin.x - width - 4
-                if (py + height > scr.y + scr.height)
+                if (py + height > g.y + g.h)
                     py = buttonWin.y + buttonWin.height - height
-                px = Math.max(scr.x, Math.min(px, scr.x + scr.width - 8))
-                py = Math.max(scr.y, Math.min(py, scr.y + scr.height - 8))
+                px = Math.max(g.x, Math.min(px, g.x + g.w - width))
+                py = Math.max(g.y, Math.min(py, g.y + g.h - height))
             }
             x = px
             y = py
@@ -226,109 +224,38 @@ Window {
                         }
                     }
                 }
-            }
-        }
-    }
 
-    // ── 快捷设置面板（右键）──────────────────────────────────
-    Window {
-        id: quickPanel
-        objectName: "quickPanel"
-        width: 208
-        height: quickLayout.implicitHeight + 20
-        visible: false
-        color: "transparent"
-        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-
-        function reposition() {
-            var px = buttonWin.x + buttonWin.width + 6
-            var py = buttonWin.y
-            // 沿用作者原来的 Screen API：应用内的 Qt 版本支持它；
-            // 若该成员不存在则得到 undefined，下面的守卫会跳过翻转，不会抛错
-            var scr = Screen.availableVirtualGeometry
-            if (scr && scr.width > 0 && scr.height > 0) {
-                if (px + width > scr.x + scr.width)
-                    px = buttonWin.x - width - 6
-                if (py + height > scr.y + scr.height)
-                    py = buttonWin.y + buttonWin.height - height
-                px = Math.max(scr.x, Math.min(px, scr.x + scr.width - 8))
-                py = Math.max(scr.y, Math.min(py, scr.y + scr.height - 8))
-            }
-            x = px
-            y = py
-        }
-
-        function openMenu() {
-            reposition()
-            visible = true
-            requestActivate()
-        }
-
-        function closeMenu() {
-            visible = false
-        }
-
-        onActiveChanged: if (!active && visible) closeMenu()
-        onClosing: visible = false
-
-        Rectangle {
-            id: quickRoot
-            anchors.fill: parent
-            radius: 12
-            color: "#F21E1E1E"
-            border.width: 1
-            border.color: "#33FFFFFF"
-
-            ColumnLayout {
-                id: quickLayout
-                anchors.fill: parent
-                anchors.margins: 10
-                spacing: 6
-
-                Text {
-                    text: "快捷设置"
-                    color: "#9FFFFFFF"
-                    font.pixelSize: 11
-                    Layout.bottomMargin: 2
-                }
-
-                RowLayout {
+                // 隐藏：只收起窗口，不改配置；下课后由后端自动恢复显示
+                Rectangle {
+                    id: hideBtn
                     Layout.fillWidth: true
-                    spacing: 8
-                    Text { text: "浮窗模式"; color: "white"; font.pixelSize: 12; Layout.fillWidth: true }
-                    Switch {
-                        checked: backend ? backend.floatMode : true
-                        onToggled: if (backend) backend.setFloatMode(checked)
+                    Layout.preferredHeight: 30
+                    radius: 10
+                    color: hmouse.pressed ? "#505A8F"
+                           : (hmouse.containsMouse ? "#40405A8F" : "#1AFFFFFF")
+                    border.width: 1
+                    border.color: hmouse.containsMouse ? "#805A9BFF" : "#22FFFFFF"
+                    scale: hmouse.pressed ? 0.97 : 1.0
+
+                    Behavior on color { ColorAnimation { duration: 90 } }
+                    Behavior on scale { NumberAnimation { duration: 90 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "隐藏"
+                        color: hmouse.containsMouse ? "#FFFFFF" : "#E6FFFFFF"
+                        font.pixelSize: 13
                     }
-                }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    Text { text: "点击后隐藏"; color: "white"; font.pixelSize: 12; Layout.fillWidth: true }
-                    Switch {
-                        checked: backend ? backend.clickHide : false
-                        onToggled: if (backend) backend.setClickHide(checked)
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    Button {
-                        Layout.fillWidth: true
-                        text: "收起按钮"
+                    MouseArea {
+                        id: hmouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            quickPanel.closeMenu()
-                            if (backend) backend.hideButton()
-                        }
-                    }
-                    Button {
-                        Layout.fillWidth: true
-                        text: "设置页"
-                        onClicked: {
-                            quickPanel.closeMenu()
-                            if (backend) backend.openSettings()
+                            countPanel.closeMenu()
+                            if (backend)
+                                backend.hideForLesson()
                         }
                     }
                 }
