@@ -24,3 +24,25 @@ SOFTWARE.
 
 This plugin is provided as-is, with no guarantee of ongoing maintenance or bug fixes. 
 Use at your own risk. The author is not obligated to provide support or updates.
+
+--------------------------------------------------------------------------------
+第三方联动说明 / Third-Party Integration Notice
+
+本插件提供「SecRandom」点名方式，该功能通过下面两种公开接口与该软件联动：
+
+1. URL 协议（触发）
+   使用 SecRandom 注册到系统的 secrandom:// 协议唤起它执行点名动作。
+   对应的系统注册表项（由 SecRandom 自己安装时写入）：
+       HKEY_CURRENT_USER\Software\Classes\secrandom\shell\open\command
+           = <SecRandom 安装目录>\SecRandom.Desktop.exe --url "%1"
+
+2. 点名记录文件（读取结果）
+   读取 SecRandom 自己维护的点名记录以获知被点到的学生：
+       <SecRandom 安装目录>\data\TEMP\roll_call_record_default.json
+   仅读取其中 name / id / lastDrawnTime 字段，不写入、不修改该文件。
+
+SecRandom 项目地址：https://github.com/SECTL/SecRandom
+（本插件并未复制或分发上述项目的任何代码，仅通过其公开的协议与数据文件交互。
+  上述项目版权归各自作者所有，遵循其各自的许可证。）
+
+--------------------------------------------------------------------------------

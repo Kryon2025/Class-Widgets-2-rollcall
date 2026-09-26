@@ -27,6 +27,7 @@ PluginPage {
     property string newName: ""
     property string pickResultText: "（点击抽取查看）"
     property bool ready: false
+    property bool isSecrandom: false   // 当前是否把点名交给 SecRandom
 
     function step(field, delta, lo, hi) {
         var v = Math.max(lo, Math.min(hi, root[field] + delta))
@@ -48,6 +49,7 @@ PluginPage {
         noRepeatValue = cfg.no_repeat !== undefined ? cfg.no_repeat : true
         luckValue = cfg.luck_enabled !== undefined ? cfg.luck_enabled : false
         modeValue = cfg.mode || "roll"
+        root.isSecrandom = (cfg.service === "secrandom")
         notifySecondsValue = cfg.notify_duration || 4
         btnWidthValue = cfg.button_width || 52
         btnHeightValue = cfg.button_height || 40
@@ -88,6 +90,64 @@ PluginPage {
     ColumnLayout {
         Layout.fillWidth: true
         spacing: 4
+
+        // ── 点名服务（先选这个，其它设置跟着它显示/隐藏）────
+        Text { text: "点名服务"; font.bold: true }
+
+        SettingCard {
+            Layout.fillWidth: true
+            icon.name: "ic_fluent_people_20_regular"
+            title: "用哪套点名"
+            description: root.isSecrandom
+                ? "当前：SecRandom。本插件的按钮已隐藏 —— 请打开 SecRandom 设置，它自己就有点名按钮。"
+                : "当前：内置点名。使用本插件自己的点名按钮，以及下面全部设置。"
+            RowLayout {
+                spacing: 8
+                Button {
+                    text: "内置点名"
+                    highlighted: !root.isSecrandom
+                    onClicked: if (backend) backend.setService("builtin")
+                }
+                Button {
+                    text: "SecRandom"
+                    highlighted: root.isSecrandom
+                    onClicked: if (backend) backend.setService("secrandom")
+                }
+            }
+        }
+
+        SettingCard {
+            Layout.fillWidth: true
+            visible: root.isSecrandom
+            icon.name: "ic_fluent_alert_20_regular"
+            title: "点名交给 SecRandom"
+            description: "本插件不再显示点名按钮，下面所有设置也已隐藏。请用 SecRandom 自己的按钮点名（名单和规则都在 SecRandom 里设置）；本插件会在后台监听它的点名记录，被点到的名字由 ClassWidgets2 的灵动通知播报。"
+        }
+
+        SettingCard {
+            Layout.fillWidth: true
+            icon.name: "ic_fluent_alert_20_regular"
+            title: "灵动通知显示时长"
+            description: "点名结果用 ClassWidgets2 灵动通知播报时停留的秒数（2–15 秒），两种点名方式都生效。"
+            RowLayout {
+                spacing: 8
+                Button { text: "−"; implicitWidth: 30; implicitHeight: 28; onClicked: root.stepNotify(-1) }
+                Text {
+                    Layout.preferredWidth: 60
+                    horizontalAlignment: Text.AlignHCenter
+                    text: root.notifySecondsValue + " 秒"
+                    font.bold: true
+                }
+                Button { text: "+"; implicitWidth: 30; implicitHeight: 28; onClicked: root.stepNotify(1) }
+            }
+        }
+
+        // ── 以下全部是「内置点名」的设置，选 SecRandom 时整体隐藏 ──
+        ColumnLayout {
+            id: builtinBlock
+            Layout.fillWidth: true
+            spacing: 4
+            visible: !root.isSecrandom
 
         // ── 悬浮按钮 ────────────────────────────────────────
         Text { text: "悬浮按钮"; font.bold: true }
@@ -445,6 +505,7 @@ PluginPage {
                     color: "#888888"
                 }
             }
+        }
         }
     }
 }

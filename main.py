@@ -23,6 +23,7 @@ import json
 import random
 import re
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -53,6 +54,23 @@ class RollConfig(ConfigBaseModel):
     luck_enabled: bool = False     # 概率抽点：按每人权重加权抽取
     mode: str = "roll"             # roll=结果窗口点名, notify=灵动通知
     notify_duration: int = 4       # 灵动通知停留时长（秒）
+    service: str = ""              # ""=还没选(首次使用要引导) | builtin=内置点名 | secrandom=SecRandom
+    secrandom_action: str = "roll_call"   # secrandom:// 后面的动作名；点到的人不对就改这里
+
+
+def _load_secrandom_service():
+    """惰性载入 SecRandom 服务模块。
+
+    单独做成模块、并用 try 包住：万一它缺失或报错，也只是第二种服务不可用，
+    内置点名照常工作，不会把整个插件拖垮。
+    """
+    try:
+        import secrandom_service as _sr  # type: ignore
+
+        return _sr
+    except Exception as e:
+        logger.warning(f"[rollcall] 载入 SecRandom 服务失败: {e}")
+        return None
 
 
 def _data_dir() -> Path:
@@ -146,6 +164,7 @@ class Plugin(CW2Plugin):
 
     configChanged = Signal()
     rosterChanged = Signal()
+    serviceChosen = Signal()
 
     def __init__(self, api: PluginAPI):
         super().__init__(api)
@@ -167,6 +186,13 @@ class Plugin(CW2Plugin):
         self._lesson_timer.setSingleShot(True)
         self._lesson_timer.setInterval(60 * 60 * 1000)  # 兜底：最多隐藏一小时
         self._lesson_timer.timeout.connect(self._restore_from_lesson_hide)
+        self._provider = None   # 主程序通知提供者（惰性注册）
+        # SecRandom 服务：后台监听它的点名记录（绝不触发它的窗口）
+        self._sr = None
+        self._sr_baseline = 0.0
+        self._sr_timer = QTimer(self)
+        self._sr_timer.setInterval(1500)
+        self._sr_timer.timeout.connect(self._poll_secrandom)
         self._load_roster()
         self._load_weights()
         self._load_pos()
@@ -181,6 +207,20 @@ class Plugin(CW2Plugin):
         except Exception as e:
             logger.warning(f"[rollcall] 注册配置模型失败: {e}")
         self._register_settings_page()
+        # 注册官方灵动通知提供者（与 com.reminder 一致）
+        # 刻意不传 icon：传了不存在的图名会让官方组件留出一块空白
+        try:
+            self._provider = self.api.notification.get_provider(
+                provider_id=self.pid,
+                name="随机点名",
+            )
+            logger.info("[rollcall] 灵动通知提供者注册成功")
+        except Exception as e:
+            logger.warning(f"[rollcall] 注册灵动通知提供者失败: {e}")
+            self._provider = None
+        # 选了 SecRandom 就后台监听它的点名记录
+        if self._config.service == "secrandom":
+            self._start_secrandom_watch()
         self._connect_runtime()
         if self._config.window_visible:
             self._create_windows()
@@ -279,8 +319,39 @@ class Plugin(CW2Plugin):
 
     @Slot(str)
     def setMode(self, value: str) -> None:
-        """点名表现形式：固定为结果窗口（灵动通知已移除）。"""
+        """点名表现形式：固定为结果窗口。
+
+        注意：这里的 notify 是**插件自己画的顶部胶囊**，不是主程序的灵动通知，
+        所以固定为 roll；要播报一律走主程序的灵动通知（见 _notify）。
+        """
         self._config.mode = "roll"
+        self._save_config()
+        self.configChanged.emit()
+
+    @Slot(str)
+    def setService(self, value: str) -> None:
+        """点名方式：builtin=内置抽取, secrandom=交给 SecRandom。"""
+        v = str(value).strip()
+        self._config.service = v if v in ("builtin", "secrandom") else "builtin"
+        self._save_config()
+        self.serviceChosen.emit()
+        self.configChanged.emit()
+        # 选 SecRandom 就用它自己的点名按钮，本插件不再显示任何东西
+        btn = self._find_window("buttonWin")
+        if btn is not None:
+            btn.setVisible(self._config.service != "secrandom" and self._config.window_visible)
+        # 选 SecRandom：后台盯着它的点名记录，读到新记录就用官方灵动通知播报
+        if self._config.service == "secrandom":
+            self._start_secrandom_watch()
+        else:
+            self._stop_secrandom_watch()
+        logger.info(f"[rollcall] 点名方式 = {self._config.service}")
+
+    @Slot(str)
+    def setSecrandomAction(self, value: str) -> None:
+        """SecRandom 的动作名（secrandom:// 后面那一段）。"""
+        v = str(value).strip().strip("/") or "roll_call"
+        self._config.secrandom_action = v
         self._save_config()
         self.configChanged.emit()
 
@@ -433,7 +504,12 @@ class Plugin(CW2Plugin):
             btn = self._find_window("buttonWin")
             if btn is not None:
                 btn.setVisible(False)
-        self.rollRequested.emit(max(1, min(5, int(count))))
+        n = max(1, min(5, int(count)))
+        # 选 SecRandom 时本插件的按钮是隐藏的，正常走不到这里；
+        # 就算走到也绝不调用 SecRandom —— 那会弹出它自己的点名窗口。
+        if self._config.service == "secrandom":
+            return
+        self.rollRequested.emit(n)
 
     @Slot()
     def stopRoll(self) -> None:
@@ -544,6 +620,94 @@ class Plugin(CW2Plugin):
         logger.info("[rollcall] 主程序暂不支持打开设置页，改用按钮内置面板")
         return False
 
+    # ── 第二种点名方式：SecRandom（只听不触发）───────────────
+
+    def _start_secrandom_watch(self) -> None:
+        """开始后台监听 SecRandom 的点名记录。
+
+        不触发 SecRandom、不弹它自己的点名窗口 —— 用户用 SecRandom 自己的
+        按钮点名，这边发现新记录后，用 ClassWidgets2 的官方灵动通知播报。
+        """
+        sr = _load_secrandom_service()
+        if sr is None:
+            logger.warning("[rollcall] 载入 SecRandom 服务失败，无法监听")
+            return
+        self._sr = sr
+        try:
+            cur = sr.read_last_pick()
+        except Exception as e:
+            logger.warning(f"[rollcall] 读取 SecRandom 记录失败: {e}")
+            cur = None
+        self._sr_baseline = cur.time if cur else 0.0
+        self._sr_timer.start()
+        logger.info("[rollcall] 已开始监听 SecRandom 点名记录"
+                    f"（基线 {self._sr_baseline}）")
+
+    def _stop_secrandom_watch(self) -> None:
+        self._sr_timer.stop()
+        logger.info("[rollcall] 已停止监听 SecRandom")
+
+    def _poll_secrandom(self) -> None:
+        """定时看 SecRandom 的记录；用官方灵动通知播报这次点到的所有人。"""
+        sr = self._sr
+        if sr is None:
+            return
+        try:
+            picks = sr.read_last_picks()
+        except Exception as e:
+            logger.warning(f"[rollcall] 读取 SecRandom 记录失败: {e}")
+            return
+        if not picks:
+            return
+        # 一次抽多人时这些记录的时间戳完全相同，取其中最大的作为这次的时间
+        newest = max(p.time for p in picks)
+        if newest <= self._sr_baseline:
+            return
+        self._sr_baseline = newest
+        names = [p.name for p in picks if p.name]
+        if not names:
+            return
+        logger.info("[rollcall] SecRandom 新点名 %d 人: %s" % (len(names), "、".join(names)))
+        self._notify("随机点名", "、".join(names))
+
+    # ── 结果播报：交给官方灵动通知组件 ──────────────────────
+
+    @Slot("QVariantList")
+    def onPicked(self, names) -> None:
+        """内置点名结果窗口定格后回传名字，交给官方灵动通知播报。"""
+        self._on_pick(list(names or []))
+
+    def _on_pick(self, names: list) -> None:
+        """点名出结果后，直接调官方灵动通知播报（不自己建窗口）。"""
+        names = [str(n) for n in (names or []) if str(n).strip()]
+        if not names:
+            self._notify("随机点名", "名单为空，请先导入名单")
+            return
+        self._notify("随机点名", "、".join(names))
+
+    def _get_notify_provider(self):
+        """返回 on_load 里已注册的官方通知提供者。"""
+        return getattr(self, "_provider", None)
+
+    def _notify(self, title: str, message: str) -> None:
+        """调官方灵动通知组件显示（与 com.reminder 完全一致：关键字参数）。"""
+        provider = self._get_notify_provider()
+        if provider is None:
+            logger.warning("[rollcall] 灵动通知提供者不可用，未发送")
+            return
+        duration = max(3000, int(self._config.notify_duration) * 1000)
+        try:
+            provider.push(
+                level=0,  # NotificationLevel.INFO，与 com.reminder 相同
+                title=title,
+                message=message,
+                duration=duration,
+                closable=True,
+            )
+            logger.info("[rollcall] 灵动通知已发送（官方组件）")
+        except Exception as e:
+            logger.warning(f"[rollcall] 发送灵动通知失败: {e}")
+
     # ── 窗口可读属性 ─────────────────────────────────────────
 
     def _get_window_visible(self) -> bool:
@@ -590,6 +754,29 @@ class Plugin(CW2Plugin):
         return self._config.notify_duration
 
     notifyDuration = Property(int, _get_notify_duration, notify=configChanged)
+
+    def _get_service(self) -> str:
+        return self._config.service
+
+    service = Property(str, _get_service, notify=configChanged)
+
+    def _get_service_name(self) -> str:
+        """给 UI 显示的中文名。"""
+        return "SecRandom" if self._config.service == "secrandom" else "内置点名"
+
+    serviceName = Property(str, _get_service_name, notify=configChanged)
+
+    def _get_needs_service_choice(self) -> bool:
+        """还没选过点名方式 → 首次使用要弹选择栏。"""
+        return self._config.service not in ("builtin", "secrandom")
+
+    needsServiceChoice = Property(bool, _get_needs_service_choice,
+                                  notify=configChanged)
+
+    def _get_secrandom_action(self) -> str:
+        return self._config.secrandom_action
+
+    secrandomAction = Property(str, _get_secrandom_action, notify=configChanged)
 
     def _get_roster(self) -> list:
         return list(self._roster)

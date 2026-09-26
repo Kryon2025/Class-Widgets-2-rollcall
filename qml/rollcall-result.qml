@@ -78,6 +78,7 @@ Window {
         resultWin.rolling = false
         resultWin.settled = true
         resultWin.shown = resultWin.picked
+        if (backend) backend.onPicked(resultWin.picked)
     }
 
     function dismiss() {

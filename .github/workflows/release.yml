@@ -41,7 +41,8 @@ jobs:
         with:
           name: Release ${{ github.ref_name }}
           draft: false
-          prerelease: false
+          # 标签里带 `-`（如 v1.2.0-alpha）发成预发布；纯数字版本（v1.1.3）发正式版
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             *.cwplugin
             *.zip
