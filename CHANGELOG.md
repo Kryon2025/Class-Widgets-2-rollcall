@@ -2,19 +2,32 @@
 
 随机点名（`com.rollcall`）各版本的变更记录。
 
-归类沿用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的写法：`新增 / 变更 / 修复 / 移除`。
-
-两点约定：
-
-1. 本文件里的版本号与 `cwplugin.json` 的 `version` 字段一致；对应的 git 标签是它加 `v` 前缀（`1.2.0-alpha` → 标签 `v1.2.0-alpha`）。
-2. 准备发版时，把 `## [Unreleased]` 这一节改名为版本号（并补上日期），它就会成为该版本的正式记录。
-
-> GitHub Release 的正文由工作流里的 `generate_release_notes` 自动生成（按提交记录），
-> 本文件是给人读的正式变更记录，两者互不依赖。
-
 ## [Unreleased]
 
-还没有发布的改动写在这里。
+> 下一次发布的变更写在这里。下面 `2.0.0-alpha` 是当前版本。
+
+## [2.0.0-alpha] - 2026-09-27
+
+### 变更
+
+- **设置页最上面那张卡片改名**：「使用什么服务」。
+- **点名服务改成三选一**：卡片里直接列「随机点名 / SecRandom 2 / SecRandom 3」，选 SecRandom 时版本一并定下来；原来单独一张卡的「SecRandom 版本」和「自动识别」选项都已去掉。
+- **「内置点名」更名为「随机点名」**：只改名称，抽取规则、名单与权重数据都不受影响。
+- **权重范围由 1–1000 改为 1–100**（默认 100）：设置页滑块步长由 10 改为 1，抽取时按 1–100 的权重比例加权；读取旧的权重文件时会把超过 100 的值钳到 100。
+- **「SecRandom 位置」标明是哪一代**：卡片标题跟着上面的选择变成「SecRandom 2 的位置」/「SecRandom 3 的位置」，改这里只影响选中的那一代。
+
+### 修复
+
+- **SecRandom 的点名结果读不出来**（`secrandom_service.py`）：原来把「文件里第一次出现的记录」当成基线直接跳过，可真实情况是 3 代每次抽取在记录文件里**新写一条 uuid 记录**、2 代也只有在首次抽到某人时才会多出这个名字，于是两代的新点名几乎全被丢掉。现在只要某人的指纹变大（3 代是 `lastDrawnTime`，2 代是抽中次数）**或**文件里冒出从没见过的记录，都算「刚抽到」；2 代里计数仍为 0 的条目（被列进文件但没真抽到）依旧不播报。
+- **SecRandom 的位置不再两代共用**：2 代和 3 代原来共用一个位置字段，在 2 代里选的位置会把 3 代一起带跑偏（表现为「选了 2 代却去读 3 代的目录」）。现在每一代各存自己的位置（`secrandom_paths`），升级后旧配置里的全局位置会自动归到当前选中的那一代。
+- **2 代改读它自己的历史记录**（`secrandom_service.py`）：2 代其实每次抽取都会往 `data\history\roll_call_history\<班级>.json` 追加一条带 `draw_time` 的明细（每人还有 `last_drawn_time`），比原来只看 `data\TEMP\roll_call_record__….json` 的「人名 → 抽中次数」可靠 —— TEMP 那份会被 SecRandom 的「清除记录」清空、也没有时间戳。现在 2 代优先按 `draw_time` 判断新增，没有历史文件时仍退回 TEMP 的计数法；**3 代完全不受影响**，它照旧只看 `data\TEMP\roll_call_record_default.json`（3 代的历史文件是另一种结构，不参与判断）。
+
+### 合规
+
+- **按规范重排许可证文件**：`LICENSE` 只留**逐字的 MIT 正文**（Copyright (c) 2026 Kryon）。此前把第三方说明追加在正文之后，会让 GitHub / Licensee / SPDX 等工具把它识别成 `Other / NOASSERTION`（实测本仓库当时正是这个状态）；GitHub 官方文档对这种情况的要求是「simplify your LICENSE file and note the complexity somewhere else」，故按此重排。
+- **新增 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)**：承接所有「不属于 MIT 正文」的内容 —— 与 SecRandom 的两种联动方式（读取点名记录文件；可选的 URL 协议 / 命名管道，点名过程中不主动触发）、**SecRandom**（GPLv3，© 2025-2026 SECTL）与 **ClassIsland**（GPLv3）的说明（不含、不链接、不修改其代码，故 MIT 不受传染；若今后内联其代码须转 GPLv3）、**SecRandom-CI**（MIT，© 2025 黎泽懿）的完整 MIT 全文与参考过的上游文件清单，以及名称商标与「无隶属、无背书」声明。
+- **IPC 客户端补出处与版权**（`secrandom_ipc.py`）：文件头注明协议来自 SecRandom-CI 的 `SecRandom4Ci/Shared/SecRandomIpcSendUrl.cs`，并按其 MIT 要求保留 Copyright (c) 2025 黎泽懿 的声明。
+- **代码文件加 SPDX 标识**：`main.py`、`secrandom_service.py`、`secrandom_ipc.py` 与三个 `.qml` 顶部标注 `SPDX-FileCopyrightText: 2026 Kryon` / `SPDX-License-Identifier: MIT`（REUSE 规范写法）；README 的「第三方组件与声明」「版权 / License」两节改为摘要并指向 `LICENSE` 与 `THIRD-PARTY-NOTICES.md`。
 
 ## [1.2.0-alpha] - 2026-09-27
 
@@ -23,27 +36,30 @@
 
 ### 新增
 
-- **点名服务选择**：设置页顶部新增「点名服务」区，可在「内置点名」与「SecRandom」之间切换。
-- **SecRandom 联动**（`secrandom_service.py`）：自动从注册表定位 SecRandom 安装目录，监听它的点名记录文件
-  `<SecRandom 安装目录>\data\TEMP\roll_call_record_default.json`，点名前后各读一次，
-  `lastDrawnTime` 变新的那条就是刚被点到的同学（多人一起被点会一起播报）。
+- **点名服务选择**：设置页顶部新增「点名服务」区，可在「随机点名」与「SecRandom」之间切换。
+- **SecRandom 联动**（`secrandom_service.py`）：自动定位 SecRandom 安装目录（注册表 + 扫各盘 + 用 `data\TEMP` 校验，认准后缓存），监听它的点名记录文件。
+  **3 代**（`SecRandom.Desktop.exe`，如 `F:\SECTL\SecRandom`）读 `roll_call_record_default.json`，按每条记录的 `lastDrawnTime` 变新判断；
+  **2 代**（`SecRandom.exe`，如 `D:\SecRandom`）按抽取范围存成 `roll_call_record__<班级>__抽取全部学生.json`，内容是「人名 → 抽中次数」、没有时间戳，改按**次数变多**判断。
   全程只读，不改动 SecRandom 的任何配置，也不打开或接管它的窗口。
+- **SecRandom 版本与位置可选**：在「点名服务」区直接选「SecRandom 2」或「SecRandom 3」，另有「SecRandom 位置」（显示自动扫到的位置，可「重新扫描」，也可点「选择主程序…」自己指定，换盘/换目录都行）。选定某一代后**只跑对应那一套**，另一代的文件连扫都不扫；版本识别结果和安装目录都会缓存，轮询时不再反复解析文件。
 - **SecRandom IPC 客户端**（`secrandom_ipc.py`）：命名管道的收发实现，供后续与 SecRandom 直接通信使用。
 - **灵动通知显示时长**：2–15 秒可调，两种点名方式都生效。
 - 选中「SecRandom」时，「悬浮按钮 / 点名方式 / 抽取规则 / 名单 / 测试」整块设置自动隐藏，
-  设置页只留下「点名服务」与「灵动通知显示时长」；切回内置点名即原样恢复，名单和权重数据不受影响。
+  设置页只留下「点名服务」与「灵动通知显示时长」；切回随机点名即原样恢复，名单和权重数据不受影响。
 
 ### 变更
 
 - **点名结果改用 Class Widgets 2 官方的灵动通知播报**（`api.notification.get_provider()` + `push()`），
   不再使用插件自己绘制的顶部胶囊。
-- 取消「点名方式：结果窗口 / 灵动通知」的二选一：内置点名固定为**结果窗口定格 + 灵动通知播报**同时进行。
+- 取消「点名方式：结果窗口 / 灵动通知」的二选一：随机点名固定为**结果窗口定格 + 灵动通知播报**同时进行。
 - 通知 provider 改在 `on_load` 阶段注册，`push()` 改用主程序 SDK 的关键字参数写法，与官方示例保持一致。
 - README 依据代码实际行为重写（左键菜单为 1 / 2 / 3 名、没有右键菜单、数据文件存放位置等均已更正）。
 
 ### 修复
 
 - `secrandom_ipc.py` 的模块文档字符串里 `\.\pipe\` 未转义，导入时会触发 Python 的 `SyntaxWarning`。
+- 主程序「隐藏小组件」开着时，灵动通知没有落脚点、根本看不见：播报前会临时把**小组件层**恢复显示（并落盘），播报完毕再还原成原先的隐藏状态；按钮被「点击后隐藏」「本节课隐藏」收起时也会临时露出来。选 SecRandom 时不会唤醒本插件的按钮，按钮本来就可见时也不会被多收一次。
+- SecRandom **2 代**（如 `D:\SecRandom`）此前完全不联动：安装目录原先只认注册表指向的路径（可能是指向已卸载旧版本的残留），记录也只会读 `roll_call_record_default.json` 并靠 `lastDrawnTime` 判断。现在改为「注册表 + 扫各盘 + `data\TEMP` 校验」定位、两代**同时监听**，2 代那种「人名 → 抽中次数」的记录按**次数变多**判断。
 
 ### 移除
 

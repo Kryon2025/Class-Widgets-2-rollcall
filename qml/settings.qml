@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kryon
+//
+// SPDX-License-Identifier: MIT
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -28,6 +31,13 @@ PluginPage {
     property string pickResultText: "（点击抽取查看）"
     property bool ready: false
     property bool isSecrandom: false   // 当前是否把点名交给 SecRandom
+    property string srVersionValue: ""                 // ""=自动识别 / "2" / "3"
+    property string srPathValue: ""                    // 手动指定的主程序或目录
+    property string srInfoText: "（切到 SecRandom 后自动探测）"
+
+    // 设置页显示用：当前挑的是哪一代 SecRandom
+    readonly property string srVersionLabel: srVersionValue === "2" ? "2 代"
+                                           : srVersionValue === "3" ? "3 代" : "自动识别"
 
     function step(field, delta, lo, hi) {
         var v = Math.max(lo, Math.min(hi, root[field] + delta))
@@ -54,7 +64,11 @@ PluginPage {
         btnWidthValue = cfg.button_width || 52
         btnHeightValue = cfg.button_height || 40
         animSecondsValue = cfg.animation_seconds || 3
+        srVersionValue = cfg.secrandom_version || ""
+        srPathValue = (typeof backend.currentSecrandomPath === "function")
+                      ? backend.currentSecrandomPath() : (cfg.secrandom_path || "")
         refreshRoster()
+        refreshSecrandom()
         ready = true
     }
 
@@ -63,6 +77,12 @@ PluginPage {
         countValue = backend.getRosterCount()
         rosterPreview = backend.getRoster()
         weightsMap = backend.getWeights()
+    }
+
+    // 只在真的用 SecRandom 时才去探测：没选它就别扫盘，省掉没必要的开销
+    function refreshSecrandom() {
+        if (!backend || !root.isSecrandom) return
+        srInfoText = backend.secrandomInfo()
     }
 
     function addCurrent() {
@@ -87,6 +107,18 @@ PluginPage {
         onAccepted: if (backend) backend.importRoster(rosterDialog.selectedFile)
     }
 
+    FileDialog {
+        id: srPathDialog
+        title: "选择 SecRandom 主程序（SecRandom.exe / SecRandom.Desktop.exe）"
+        nameFilters: ["SecRandom 主程序 (SecRandom*.exe)", "可执行文件 (*.exe)", "所有文件 (*)"]
+        onAccepted: {
+            if (!backend) return
+            backend.setSecrandomPath(srPathDialog.selectedFile)
+            root.srPathValue = srPathDialog.selectedFile
+            root.srInfoText = backend.secrandomInfo()
+        }
+    }
+
     ColumnLayout {
         Layout.fillWidth: true
         spacing: 4
@@ -97,22 +129,41 @@ PluginPage {
         SettingCard {
             Layout.fillWidth: true
             icon.name: "ic_fluent_people_20_regular"
-            title: "用哪套点名"
+            title: "使用什么服务"
             description: root.isSecrandom
-                ? "当前：SecRandom。本插件的按钮已隐藏 —— 请打开 SecRandom 设置，它自己就有点名按钮。"
-                : "当前：内置点名。使用本插件自己的点名按钮，以及下面全部设置。"
-            RowLayout {
+                ? "当前：SecRandom（" + root.srVersionLabel + "）。本插件的点名按钮已隐藏 —— 请用 SecRandom 自己的按钮点名。"
+                : "当前：随机点名。使用本插件自己的点名按钮，以及下面全部设置。"
+            ColumnLayout {
+                Layout.fillWidth: true
                 spacing: 8
-                Button {
-                    text: "内置点名"
-                    highlighted: !root.isSecrandom
-                    onClicked: if (backend) backend.setService("builtin")
+
+                RowLayout {
+                    spacing: 8
+                    Button {
+                        text: "随机点名"
+                        highlighted: !root.isSecrandom
+                        onClicked: if (backend) backend.setService("builtin")
+                    }
+                    Button {
+                        text: "SecRandom 2"
+                        highlighted: root.isSecrandom && root.srVersionValue === "2"
+                        onClicked: {
+                            if (!backend) return
+                            backend.setSecrandomVersion("2")
+                            backend.setService("secrandom")
+                        }
+                    }
+                    Button {
+                        text: "SecRandom 3"
+                        highlighted: root.isSecrandom && root.srVersionValue === "3"
+                        onClicked: {
+                            if (!backend) return
+                            backend.setSecrandomVersion("3")
+                            backend.setService("secrandom")
+                        }
+                    }
                 }
-                Button {
-                    text: "SecRandom"
-                    highlighted: root.isSecrandom
-                    onClicked: if (backend) backend.setService("secrandom")
-                }
+
             }
         }
 
@@ -122,6 +173,59 @@ PluginPage {
             icon.name: "ic_fluent_alert_20_regular"
             title: "点名交给 SecRandom"
             description: "本插件不再显示点名按钮，下面所有设置也已隐藏。请用 SecRandom 自己的按钮点名（名单和规则都在 SecRandom 里设置）；本插件会在后台监听它的点名记录，被点到的名字由 ClassWidgets2 的灵动通知播报。"
+        }
+
+        SettingCard {
+            Layout.fillWidth: true
+            visible: root.isSecrandom
+            icon.name: "ic_fluent_folder_20_regular"
+            title: "SecRandom" + (root.srVersionValue === "2" ? " 2"
+                                : root.srVersionValue === "3" ? " 3" : "") + " 的位置"
+            description: root.srInfoText
+            ColumnLayout {
+                spacing: 6
+                Layout.fillWidth: true
+                Text {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    opacity: 0.7
+                    font.pixelSize: 12
+                    text: root.srVersionValue === "2"
+                          ? "2 代的主程序是 SecRandom.exe。"
+                          : root.srVersionValue === "3"
+                            ? "3 代的主程序是 SecRandom.Desktop.exe。"
+                            : "2 代的主程序是 SecRandom.exe，3 代是 SecRandom.Desktop.exe。"
+                }
+                RowLayout {
+                    spacing: 8
+                    Button {
+                        text: "重新扫描"
+                        onClicked: if (backend) root.srInfoText = backend.rescanSecrandom()
+                    }
+                    Button {
+                        text: "选择主程序…"
+                        onClicked: srPathDialog.open()
+                    }
+                    Button {
+                        text: "恢复自动扫描"
+                        visible: root.srPathValue !== ""
+                        onClicked: {
+                            if (!backend) return
+                            backend.setSecrandomPath("")
+                            root.srPathValue = ""
+                            root.srInfoText = backend.secrandomInfo()
+                        }
+                    }
+                }
+                Text {
+                    visible: root.srPathValue !== ""
+                    text: "已手动指定：" + root.srPathValue
+                    wrapMode: Text.WrapAnywhere
+                    opacity: 0.7
+                    font.pixelSize: 12
+                    Layout.fillWidth: true
+                }
+            }
         }
 
         SettingCard {
@@ -142,7 +246,7 @@ PluginPage {
             }
         }
 
-        // ── 以下全部是「内置点名」的设置，选 SecRandom 时整体隐藏 ──
+        // ── 以下全部是「随机点名」的设置，选 SecRandom 时整体隐藏 ──
         ColumnLayout {
             id: builtinBlock
             Layout.fillWidth: true
@@ -296,7 +400,7 @@ PluginPage {
             icon.name: "ic_fluent_slide_settings_20_regular"
             title: "抽中概率"
             description: root.countValue > 0
-                         ? "为每位同学设置权重（1–1000，默认 100）。仅在开启“概率抽点”后生效。"
+                         ? "为每位同学设置权重比例（1–100，默认 100）。仅在开启“概率抽点”后生效。"
                          : "名单为空，请先在下方导入名单。"
 
             ColumnLayout {
@@ -350,8 +454,8 @@ PluginPage {
                                     id: wSlider
                                     Layout.fillWidth: true
                                     from: 1
-                                    to: 1000
-                                    stepSize: 10
+                                    to: 100
+                                    stepSize: 1
                                     value: root.weightsMap[modelData] !== undefined
                                            ? root.weightsMap[modelData] : 100
                                     onMoved: if (backend) backend.setWeight(modelData, value)

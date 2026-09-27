@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Kryon
+#
+# SPDX-License-Identifier: MIT
 """
 随机点名（Class Widgets 2 版）
 =============================
@@ -54,15 +57,18 @@ class RollConfig(ConfigBaseModel):
     luck_enabled: bool = False     # 概率抽点：按每人权重加权抽取
     mode: str = "roll"             # roll=结果窗口点名, notify=灵动通知
     notify_duration: int = 4       # 灵动通知停留时长（秒）
-    service: str = ""              # ""=还没选(首次使用要引导) | builtin=内置点名 | secrandom=SecRandom
+    service: str = ""              # ""=还没选(首次使用要引导) | builtin=随机点名 | secrandom=SecRandom
     secrandom_action: str = "roll_call"   # secrandom:// 后面的动作名；点到的人不对就改这里
+    secrandom_version: str = ""    # ""=自动识别 | 2=SecRandom 2 代 | 3=SecRandom 3 代
+    secrandom_path: str = ""       # 旧版的全局位置；升级时会被搬进每一代自己的格子里
+    secrandom_paths: dict = {}     # 每一代自己的位置：{"2": …, "3": …}，互不影响
 
 
 def _load_secrandom_service():
     """惰性载入 SecRandom 服务模块。
 
     单独做成模块、并用 try 包住：万一它缺失或报错，也只是第二种服务不可用，
-    内置点名照常工作，不会把整个插件拖垮。
+    随机点名照常工作，不会把整个插件拖垮。
     """
     try:
         import secrandom_service as _sr  # type: ignore
@@ -218,8 +224,12 @@ class Plugin(CW2Plugin):
         except Exception as e:
             logger.warning(f"[rollcall] 注册灵动通知提供者失败: {e}")
             self._provider = None
-        # 选了 SecRandom 就后台监听它的点名记录
+        # 选了 SecRandom 才后台监听它的点名记录；否则记一行，方便排查「为什么没播报」
+        if self._config.service != "secrandom":
+            logger.info(f"[rollcall] 点名方式 = {self._config.service or '未选'}"
+                        "，不监听 SecRandom 的点名记录")
         if self._config.service == "secrandom":
+            self._migrate_secrandom_path()
             self._start_secrandom_watch()
         self._connect_runtime()
         if self._config.window_visible:
@@ -328,9 +338,17 @@ class Plugin(CW2Plugin):
         self._save_config()
         self.configChanged.emit()
 
+    def _button_should_show(self) -> bool:
+        """悬浮按钮该不该显示。
+
+        交给 SecRandom 时本插件一个按钮都不露 —— 建窗、切服务、课后恢复
+        都要走这一个判断，否则重启后按钮会被重新亮出来。
+        """
+        return self._config.service != "secrandom" and self._config.window_visible
+
     @Slot(str)
     def setService(self, value: str) -> None:
-        """点名方式：builtin=内置抽取, secrandom=交给 SecRandom。"""
+        """点名方式：builtin=随机点名, secrandom=交给 SecRandom。"""
         v = str(value).strip()
         self._config.service = v if v in ("builtin", "secrandom") else "builtin"
         self._save_config()
@@ -339,7 +357,7 @@ class Plugin(CW2Plugin):
         # 选 SecRandom 就用它自己的点名按钮，本插件不再显示任何东西
         btn = self._find_window("buttonWin")
         if btn is not None:
-            btn.setVisible(self._config.service != "secrandom" and self._config.window_visible)
+            btn.setVisible(self._button_should_show())
         # 选 SecRandom：后台盯着它的点名记录，读到新记录就用官方灵动通知播报
         if self._config.service == "secrandom":
             self._start_secrandom_watch()
@@ -435,10 +453,10 @@ class Plugin(CW2Plugin):
 
     @Slot(str, int)
     def setWeight(self, name: str, value: int) -> None:
-        """设置某人的抽中权重（1 ~ 1000，越大越容易被抽到）。"""
+        """设置某人的抽中权重比例（1 ~ 100，越大越容易被抽到）。"""
         if name not in self._roster:
             return
-        self._weights[name] = max(1, min(1000, int(value)))
+        self._weights[name] = max(1, min(100, int(value)))
         self._save_weights()
         self.rosterChanged.emit()
 
@@ -472,7 +490,7 @@ class Plugin(CW2Plugin):
         n = max(1, min(10, int(count)))
         if self._config.luck_enabled:
             pool = list(self._roster)
-            weights = [max(1, int(self._weights.get(x, 100))) for x in pool]
+            weights = [max(1, min(100, int(self._weights.get(x, 100)))) for x in pool]
             out: list[str] = []
             for _ in range(min(n, len(pool))):
                 i = random.choices(range(len(pool)), weights=weights, k=1)[0]
@@ -552,7 +570,7 @@ class Plugin(CW2Plugin):
         self._lesson_timer.stop()
         self._lesson_hidden = False
         self._lesson_key = None
-        if not self._config.window_visible:
+        if not self._button_should_show():
             return
         btn = self._find_window("buttonWin")
         if btn is not None:
@@ -620,7 +638,103 @@ class Plugin(CW2Plugin):
         logger.info("[rollcall] 主程序暂不支持打开设置页，改用按钮内置面板")
         return False
 
+    # ── 设置页：SecRandom 版本与位置 ─────────────────────────
+
+    @Slot(str)
+    def setSecrandomVersion(self, value: str) -> None:
+        """选 SecRandom 版本（""=自动识别 / "2" / "3"），选完立刻重新监听。"""
+        v = str(value or "").strip()
+        self._config.secrandom_version = v if v in ("2", "3") else ""
+        self._save_config()
+        self._restart_secrandom_watch()
+        self.configChanged.emit()
+
+    @Slot(str)
+    def setSecrandomPath(self, value: str) -> None:
+        """手动指定**当前这一代**的主程序或目录（空串＝回到自动扫描）。
+
+        位置按代分开存：在 SecRandom 2 里选的位置不会影响 SecRandom 3。
+        """
+        p = str(value or "").strip()
+        v = str(self._config.secrandom_version or "")
+        if v in ("2", "3"):
+            paths = dict(self._config.secrandom_paths or {})
+            if p:
+                paths[v] = p
+            else:
+                paths.pop(v, None)
+            self._config.secrandom_paths = paths
+        else:
+            self._config.secrandom_path = p
+        self._save_config()
+        self._restart_secrandom_watch()
+        self.configChanged.emit()
+
+    @Slot(result=str)
+    def currentSecrandomPath(self) -> str:
+        """设置页显示用：当前这一代自己的位置（空串＝自动扫描）。"""
+        return self._sr_path()
+
+    def _sr_path(self) -> str:
+        """当前这一代的位置；只有旧版全局位置时兜底用它。"""
+        v = str(self._config.secrandom_version or "")
+        if v in ("2", "3"):
+            return str((self._config.secrandom_paths or {}).get(v) or "")
+        return str(self._config.secrandom_path or "")
+
+    def _migrate_secrandom_path(self) -> None:
+        """旧版只有一个全局位置：搬进当前这一代自己的格子，两代从此互不影响。"""
+        legacy = str(self._config.secrandom_path or "").strip()
+        v = str(self._config.secrandom_version or "")
+        if not legacy or v not in ("2", "3"):
+            return
+        paths = dict(self._config.secrandom_paths or {})
+        if paths.get(v):
+            return
+        paths[v] = legacy
+        self._config.secrandom_paths = paths
+        self._config.secrandom_path = ""
+        self._save_config()
+        logger.info(f"[rollcall] 旧的 SecRandom 位置已归到 {v} 代")
+
+    @Slot(result=str)
+    def secrandomInfo(self) -> str:
+        """设置页显示用：现在用哪一代、扫到装在哪。"""
+        sr = _load_secrandom_service()
+        if sr is None:
+            return "SecRandom 服务模块没能载入"
+        try:
+            sr.set_target(self._config.secrandom_version, self._sr_path())
+            return sr.target_summary()
+        except Exception as e:
+            logger.warning(f"[rollcall] 探测 SecRandom 失败: {e}")
+            return f"探测失败：{e}"
+
+    @Slot(result=str)
+    def rescanSecrandom(self) -> str:
+        """重新扫描一遍（清掉缓存），返回新的说明文字。"""
+        sr = _load_secrandom_service()
+        if sr is None:
+            return "SecRandom 服务模块没能载入"
+        try:
+            sr.set_target(self._config.secrandom_version, self._sr_path())
+            sr.installs(refresh=True)
+            return sr.target_summary()
+        except Exception as e:
+            logger.warning(f"[rollcall] 重新扫描 SecRandom 失败: {e}")
+            return f"探测失败：{e}"
+
     # ── 第二种点名方式：SecRandom（只听不触发）───────────────
+
+    def _apply_secrandom_target(self) -> None:
+        """把「用哪一代、装在哪」告诉 SecRandom 服务模块。"""
+        sr = getattr(self, "_sr", None)
+        if sr is None:
+            return
+        try:
+            sr.set_target(self._config.secrandom_version, self._sr_path())
+        except Exception as e:
+            logger.warning(f"[rollcall] 应用 SecRandom 目标失败: {e}")
 
     def _start_secrandom_watch(self) -> None:
         """开始后台监听 SecRandom 的点名记录。
@@ -633,6 +747,7 @@ class Plugin(CW2Plugin):
             logger.warning("[rollcall] 载入 SecRandom 服务失败，无法监听")
             return
         self._sr = sr
+        self._apply_secrandom_target()
         try:
             cur = sr.read_last_pick()
         except Exception as e:
@@ -642,6 +757,13 @@ class Plugin(CW2Plugin):
         self._sr_timer.start()
         logger.info("[rollcall] 已开始监听 SecRandom 点名记录"
                     f"（基线 {self._sr_baseline}）")
+
+    def _restart_secrandom_watch(self) -> None:
+        """改了版本/位置就重新开始监听，顺带重建基线，免得把旧记录播报出去。"""
+        if self._config.service != "secrandom":
+            return
+        self._stop_secrandom_watch()
+        self._start_secrandom_watch()
 
     def _stop_secrandom_watch(self) -> None:
         self._sr_timer.stop()
@@ -674,7 +796,7 @@ class Plugin(CW2Plugin):
 
     @Slot("QVariantList")
     def onPicked(self, names) -> None:
-        """内置点名结果窗口定格后回传名字，交给官方灵动通知播报。"""
+        """随机点名结果窗口定格后回传名字，交给官方灵动通知播报。"""
         self._on_pick(list(names or []))
 
     def _on_pick(self, names: list) -> None:
@@ -696,6 +818,9 @@ class Plugin(CW2Plugin):
             logger.warning("[rollcall] 灵动通知提供者不可用，未发送")
             return
         duration = max(3000, int(self._config.notify_duration) * 1000)
+        # 灵动通知是挂在主程序小组件层上的：那一层隐藏着的时候通知没有落脚点，
+        # 所以播报前先临时恢复显示，等播报完毕再还原成原先的隐藏状态。
+        revealed = self._reveal_for_notify()
         try:
             provider.push(
                 level=0,  # NotificationLevel.INFO，与 com.reminder 相同
@@ -707,6 +832,106 @@ class Plugin(CW2Plugin):
             logger.info("[rollcall] 灵动通知已发送（官方组件）")
         except Exception as e:
             logger.warning(f"[rollcall] 发送灵动通知失败: {e}")
+        if revealed:
+            # 多留 400ms，等通知收起动画走完再还原
+            QTimer.singleShot(duration + 400, self._restore_after_notify)
+
+    # ── 小组件层显隐（主程序的「隐藏小组件」开关）────────────────
+
+    def _global_config(self):
+        """主程序的全局配置对象；不同版本挂在不同的属性上，逐个试。"""
+        holders = [self.api]
+        app = getattr(self.api, "_app", None)
+        if app is not None:
+            holders.append(app)
+        for owner in holders:
+            for name in ("globalconfig", "config"):
+                obj = getattr(owner, name, None)
+                if obj is not None and hasattr(obj, "configs"):
+                    return obj
+        return None
+
+    def _widget_layer_hidden(self):
+        """小组件层当前是否隐藏；读不到返回 None。"""
+        cfg = self._global_config()
+        if cfg is None:
+            return None
+        try:
+            return bool(cfg.configs.interactions.hide.state)
+        except Exception:
+            return None
+
+    def _set_widget_layer_hidden(self, hidden: bool) -> bool:
+        """改小组件层的隐藏开关并落盘（不落盘窗口属性不会真正生效）。"""
+        cfg = self._global_config()
+        if cfg is None:
+            return False
+        try:
+            cfg.configs.interactions.hide.state = bool(hidden)
+            save = getattr(cfg, "save", None)
+            if callable(save):
+                save()
+            return True
+        except Exception as e:
+            logger.warning(f"[rollcall] 改写「隐藏小组件」失败: {e}")
+            return False
+
+    def _reveal_widget_layer(self) -> bool:
+        """小组件层隐藏时临时把它恢复显示，返回是否是我们动过它。"""
+        if self._widget_layer_hidden() is not True:
+            return False
+        if not self._set_widget_layer_hidden(False):
+            return False
+        self._layer_restored = True
+        logger.info("[rollcall] 小组件层原是隐藏的，已临时恢复显示供灵动通知落脚")
+        return True
+
+    def _restore_widget_layer(self) -> None:
+        """播报完毕，把小组件层还原成原先的隐藏状态。"""
+        if not getattr(self, "_layer_restored", False):
+            return
+        self._layer_restored = False
+        if self._widget_layer_hidden() is False:
+            self._set_widget_layer_hidden(True)
+            logger.info("[rollcall] 已还原小组件层的隐藏状态")
+
+    # ── 本插件按钮的临时显隐 ────────────────────────────────
+
+    def _reveal_for_notify(self) -> bool:
+        """播报前把该露出来的都露出来，返回是否动过（动过就得负责还原）。"""
+        restored = self._reveal_widget_layer()
+        if self._reveal_button():
+            restored = True
+        return restored
+
+    def _reveal_button(self) -> bool:
+        """随机点名时，被收起（点击后隐藏 / 本节课隐藏）的按钮临时露出来。
+
+        选 SecRandom 时本插件的按钮按设计就该是关的，不在这里唤醒它。
+        """
+        if self._config.service == "secrandom" or not self._config.window_visible:
+            return False
+        btn = self._find_window("buttonWin")
+        if btn is None or btn.isVisible():
+            return False
+        btn.setVisible(True)
+        logger.info("[rollcall] 临时显示按钮窗口")
+        return True
+
+    def _hide_button_again(self) -> None:
+        """把临时露出来的按钮收回原先的隐藏状态。"""
+        if not (self._lesson_hidden or self._config.click_hide):
+            # 当初隐藏它的理由已经不在了（比如这节已经下课并自动恢复），保持现状
+            return
+        btn = self._find_window("buttonWin")
+        if btn is not None and btn.isVisible():
+            btn.setVisible(False)
+            logger.info("[rollcall] 已还原按钮原先的隐藏状态")
+
+    def _restore_after_notify(self) -> None:
+        """播报完毕的统一还原入口。"""
+        self._restore_widget_layer()
+        self._hide_button_again()
 
     # ── 窗口可读属性 ─────────────────────────────────────────
 
@@ -762,7 +987,7 @@ class Plugin(CW2Plugin):
 
     def _get_service_name(self) -> str:
         """给 UI 显示的中文名。"""
-        return "SecRandom" if self._config.service == "secrandom" else "内置点名"
+        return "SecRandom" if self._config.service == "secrandom" else "随机点名"
 
     serviceName = Property(str, _get_service_name, notify=configChanged)
 
@@ -789,7 +1014,8 @@ class Plugin(CW2Plugin):
         if self._engine is not None:
             # 引擎已存在：只切换可见性，避免重复加载 QML
             for w in self._windows:
-                w.setVisible(w.property("objectName") == "buttonWin")
+                w.setVisible(w.property("objectName") == "buttonWin"
+                            and self._button_should_show())
             btn = self._find_window("buttonWin")
             if btn is not None:
                 self._apply_window_pos(btn, self._pos["button_x"], self._pos["button_y"])
@@ -814,7 +1040,7 @@ class Plugin(CW2Plugin):
                     w.setWidth(self._config.button_width)
                     w.setHeight(self._config.button_height)
                     self._apply_window_pos(w, self._pos["button_x"], self._pos["button_y"])
-                    w.setVisible(self._config.window_visible)
+                    w.setVisible(self._button_should_show())
                 elif w.property("objectName") == "resultWin":
                     self._apply_window_pos(w, self._pos["result_x"], self._pos["result_y"])
                     w.setVisible(False)
@@ -978,13 +1204,13 @@ class Plugin(CW2Plugin):
             logger.warning(f"[rollcall] 保存名单失败: {e}")
 
     def _load_weights(self) -> None:
-        """读取权重文件；只保留仍在名单中且为数字的权重。"""
+        """读取权重文件；只保留仍在名单中且为数字的权重，并钳到 1 ~ 100。"""
         try:
             if self._weights_file.exists():
                 data = json.loads(self._weights_file.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     self._weights = {
-                        k: int(v) for k, v in data.items()
+                        k: max(1, min(100, int(v))) for k, v in data.items()
                         if isinstance(k, str) and isinstance(v, (int, float))
                     }
         except Exception:

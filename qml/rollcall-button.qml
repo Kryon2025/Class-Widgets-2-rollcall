@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kryon
+//
+// SPDX-License-Identifier: MIT
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts

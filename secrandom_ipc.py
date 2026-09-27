@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
+
+# SPDX-FileCopyrightText: 2026 Kryon
+#
+# SPDX-License-Identifier: MIT
 r"""SecRandom IPC 客户端（纯标准库，无第三方依赖）。
 
 协议来源：SECTL/SecRandom-CI 的 SecRandom4Ci/Shared/SecRandomIpcSendUrl.cs
+    （MIT License, Copyright (c) 2025 黎泽懿）
+    本文件是照那份协议用 Python 重写的客户端，未复制其源码；
+    按 MIT 要求在此保留出处与版权声明，详见 THIRD-PARTY-NOTICES.md。
     - Windows:    命名管道  \\\\.\\pipe\\<名字>
     - Linux/macOS: unix socket  /tmp/<名字>.sock
     - 编码: UTF-8，一行一个 JSON，以 \n 结尾；响应也是一行 JSON
