@@ -4,7 +4,7 @@
 
 <p>为 Class Widgets 2 增加随机点名功能，辅助课堂教学</p>
 
-[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-2.0.0--alpha-5A9BFF?style=for-the-badge)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/releases)
+[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-2.0.1-5A9BFF?style=for-the-badge)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/releases)
 [![星标](https://img.shields.io/github/stars/Kryon2025/Class-Widgets-2-rollcall?style=for-the-badge&color=orange&label=%E6%98%9F%E6%A0%87)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/)
 [![开源许可](https://img.shields.io/badge/license-MIT-blue.svg?label=%E5%BC%80%E6%BA%90%E8%AE%B8%E5%8F%AF%E8%AF%81&style=for-the-badge)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/blob/main/LICENSE)
 [![下载量](https://img.shields.io/github/downloads/Kryon2025/Class-Widgets-2-rollcall/total.svg?label=%E4%B8%8B%E8%BD%BD%E9%87%8F&color=green&style=for-the-badge)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/releases)
@@ -12,14 +12,14 @@
 </div>
 
 > [!NOTE]
-> 当前版本 **2.0.0-alpha**（2.0.0 系列的预览版），要求 Class Widgets 2 的插件 API `~=0.6.0`。
+> 当前版本 **2.0.1**（正式版），要求 Class Widgets 2 的插件 API `~=0.6.0`。
 > 在 [插件广场](https://plaza.cw.rinlit.cn/plugins/com.rollcall) 可以一键安装/更新，也可以在 Release 页下载 `.cwplugin` 手动导入。
 
 ## 介绍
 
 随机点名是一个**独立悬浮窗式**的点名工具，为 Class Widgets 2 提供「课堂随机点名」。
 
-从 **2.0.0-alpha** 起，点名可以由两套独立的服务来做，在插件设置页最上面的「使用什么服务」里一键切换（SecRandom 还分 2 代 / 3 代）：
+从 **2.0.1** 起，点名可以由两套独立的服务来做，在插件设置页最上面的「使用什么服务」里一键切换（SecRandom 还分 2 代 / 3 代）：
 
 - **随机点名** —— 用本插件自己的悬浮按钮、名单和抽取规则，结果用一个可拖动的结果窗口展示。
 - **SecRandom** —— 点名的按钮、名单、规则全部交给 [SecRandom](https://github.com/SECTL/SecRandom)，本插件不再显示自己的按钮，只**在后台监听**它的点名记录，把抽到的名字用 Class Widgets 2 的灵动通知播报出来。在「使用什么服务」里点「SecRandom 2」或「SecRandom 3」即可。

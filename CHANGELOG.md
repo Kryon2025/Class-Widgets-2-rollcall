@@ -4,9 +4,9 @@
 
 ## [Unreleased]
 
-> 下一次发布的变更写在这里。下面 `2.0.0-alpha` 是当前版本。
+> 下一次发布的变更写在这里。当前版本见下方 `2.0.1`。
 
-## [2.0.0-alpha] - 2026-09-27
+## [2.0.1] - 2026-09-27
 
 ### 变更
 
@@ -29,7 +29,7 @@
 - **IPC 客户端补出处与版权**（`secrandom_ipc.py`）：文件头注明协议来自 SecRandom-CI 的 `SecRandom4Ci/Shared/SecRandomIpcSendUrl.cs`，并按其 MIT 要求保留 Copyright (c) 2025 黎泽懿 的声明。
 - **代码文件加 SPDX 标识**：`main.py`、`secrandom_service.py`、`secrandom_ipc.py` 与三个 `.qml` 顶部标注 `SPDX-FileCopyrightText: 2026 Kryon` / `SPDX-License-Identifier: MIT`（REUSE 规范写法）；README 的「第三方组件与声明」「版权 / License」两节改为摘要并指向 `LICENSE` 与 `THIRD-PARTY-NOTICES.md`。
 
-## [1.2.0-alpha] - 2026-09-27
+### 2.0.0-alpha 开发阶段（未通过插件广场发布）
 
 新增 SecRandom 的联动更新，并支持用 Class Widgets 2 的灵动通知将点名结果显示。
 同时保留原先的点名方式，用户可自行选择。
