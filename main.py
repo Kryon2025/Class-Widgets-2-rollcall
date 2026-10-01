@@ -57,6 +57,7 @@ class RollConfig(ConfigBaseModel):
     luck_enabled: bool = False     # 概率抽点：按每人权重加权抽取
     mode: str = "roll"             # roll=结果窗口点名, notify=灵动通知
     notify_duration: int = 4       # 灵动通知停留时长（秒）
+    notify_tip_dismissed: bool = False  # 设置页里「播报可以关掉」那条提示是否已被关掉
     service: str = ""              # ""=还没选(首次使用要引导) | builtin=随机点名 | secrandom=SecRandom
     secrandom_action: str = "roll_call"   # secrandom:// 后面的动作名；点到的人不对就改这里
     secrandom_version: str = ""    # ""=自动识别 | 2=SecRandom 2 代 | 3=SecRandom 3 代
@@ -213,17 +214,34 @@ class Plugin(CW2Plugin):
         except Exception as e:
             logger.warning(f"[rollcall] 注册配置模型失败: {e}")
         self._register_settings_page()
-        # 注册官方灵动通知提供者（与 com.reminder 一致）
-        # 刻意不传 icon：传了不存在的图名会让官方组件留出一块空白
+        # 注册官方灵动通知提供者（与倒计日 com.rinlit.countdowndays 用的是同一套写法：
+        # register_provider + 名称 + 图标 + use_system_notify）。
+        # 注册过的提供者会出现在「设置 → 通知与时间 → 通知」的「通知推送方」里，
+        # 用户可以在那里把「随机点名」的灵动通知单独关掉。
+        # 注：get_provider 只是 register_provider 的别名（components.py:89），两者都会注册，
+        # 真正的差别是这里补上了 icon 与 use_system_notify。
         try:
-            self._provider = self.api.notification.get_provider(
+            self._provider = self.api.notification.register_provider(
                 provider_id=self.pid,
                 name="随机点名",
+                icon="icon.png",
+                use_system_notify=True,
             )
-            logger.info("[rollcall] 灵动通知提供者注册成功")
+            logger.info(
+                "[rollcall] 灵动通知提供者已注册"
+                "（可在 设置 → 通知与时间 → 通知 的「通知推送方」里关闭）"
+            )
         except Exception as e:
-            logger.warning(f"[rollcall] 注册灵动通知提供者失败: {e}")
-            self._provider = None
+            logger.warning(f"[rollcall] register_provider 失败，回退旧接口: {e}")
+            try:
+                self._provider = self.api.notification.get_provider(
+                    provider_id=self.pid,
+                    name="随机点名",
+                )
+                logger.info("[rollcall] 灵动通知提供者已取回（旧接口）")
+            except Exception as e2:
+                logger.warning(f"[rollcall] 注册灵动通知提供者失败: {e2}")
+                self._provider = None
         # 选了 SecRandom 才后台监听它的点名记录；否则记一行，方便排查「为什么没播报」
         if self._config.service != "secrandom":
             logger.info(f"[rollcall] 点名方式 = {self._config.service or '未选'}"
@@ -811,11 +829,30 @@ class Plugin(CW2Plugin):
         """返回 on_load 里已注册的官方通知提供者。"""
         return getattr(self, "_provider", None)
 
+    def _notifications_suppressed(self) -> bool:
+        """用户在「设置 → 通知与时间 → 通知」的「通知推送方」里把「随机点名」关掉了吗。
+
+        读不到配置时不拦（照常播报），免得主程序接口变化导致点名彻底没声音。
+        """
+        provider = self._get_notify_provider()
+        if provider is None:
+            return True
+        try:
+            cfg = provider.get_config()
+        except Exception:
+            return False
+        if not getattr(cfg, "enabled", True):
+            return True
+        return not getattr(cfg, "use_app_notify", True) and not getattr(cfg, "use_system_notify", False)
+
     def _notify(self, title: str, message: str) -> None:
         """调官方灵动通知组件显示（与 com.reminder 完全一致：关键字参数）。"""
         provider = self._get_notify_provider()
         if provider is None:
             logger.warning("[rollcall] 灵动通知提供者不可用，未发送")
+            return
+        if self._notifications_suppressed():
+            logger.info("[rollcall] 已在「通知推送方」关掉「随机点名」的播报，跳过")
             return
         duration = max(3000, int(self._config.notify_duration) * 1000)
         # 灵动通知是挂在主程序小组件层上的：那一层隐藏着的时候通知没有落脚点，
@@ -934,6 +971,13 @@ class Plugin(CW2Plugin):
         self._hide_button_again()
 
     # ── 窗口可读属性 ─────────────────────────────────────────
+
+    @Slot()
+    def dismissNotifyTip(self) -> None:
+        """设置页那条「播报可在通知推送方里关掉」的提示，看过后自己关掉，之后不再显示。"""
+        self._config.notify_tip_dismissed = True
+        self._save_config()
+        self.configChanged.emit()
 
     def _get_window_visible(self) -> bool:
         return self._config.window_visible

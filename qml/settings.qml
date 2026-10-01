@@ -21,6 +21,7 @@ PluginPage {
     property bool luckValue: false
     property string modeValue: "roll"
     property int notifySecondsValue: 4
+    property bool notifyTipDismissedValue: false   // 设置页那条「播报可以关掉」的提示被关掉了没
     property int btnWidthValue: 52
     property int btnHeightValue: 40
     property int animSecondsValue: 3
@@ -61,6 +62,7 @@ PluginPage {
         modeValue = cfg.mode || "roll"
         root.isSecrandom = (cfg.service === "secrandom")
         notifySecondsValue = cfg.notify_duration || 4
+        notifyTipDismissedValue = (cfg.notify_tip_dismissed === true)
         btnWidthValue = cfg.button_width || 52
         btnHeightValue = cfg.button_height || 40
         animSecondsValue = cfg.animation_seconds || 3
@@ -243,6 +245,23 @@ PluginPage {
                     font.bold: true
                 }
                 Button { text: "+"; implicitWidth: 30; implicitHeight: 28; onClicked: root.stepNotify(1) }
+            }
+        }
+
+        // 播报可以自己关掉 —— 提示写在设置页里，而不是反过来用灵动通知去通知你关掉它
+        SettingCard {
+            Layout.fillWidth: true
+            visible: !root.notifyTipDismissedValue
+            icon.name: "ic_fluent_alert_20_regular"
+            title: "不想听播报？"
+            description: "点名结果的播报可以在「设置 → 通知与时间 → 通知」的「通知推送方」里单独关掉："
+                         + "找到「随机点名」，关掉「使用灵动通知」就行。"
+            Button {
+                text: "知道了"
+                onClicked: {
+                    root.notifyTipDismissedValue = true
+                    if (root.ready && backend) backend.dismissNotifyTip()
+                }
             }
         }
 

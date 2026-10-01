@@ -4,7 +4,7 @@
 
 <p>为 Class Widgets 2 增加随机点名功能，辅助课堂教学</p>
 
-[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-2.0.1-5A9BFF?style=for-the-badge)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/releases)
+[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-2.1.0-5A9BFF?style=for-the-badge)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/releases)
 [![星标](https://img.shields.io/github/stars/Kryon2025/Class-Widgets-2-rollcall?style=for-the-badge&color=orange&label=%E6%98%9F%E6%A0%87)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/)
 [![开源许可](https://img.shields.io/badge/license-MIT-blue.svg?label=%E5%BC%80%E6%BA%90%E8%AE%B8%E5%8F%AF%E8%AF%81&style=for-the-badge)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/blob/main/LICENSE)
 [![下载量](https://img.shields.io/github/downloads/Kryon2025/Class-Widgets-2-rollcall/total.svg?label=%E4%B8%8B%E8%BD%BD%E9%87%8F&color=green&style=for-the-badge)](https://github.com/Kryon2025/Class-Widgets-2-rollcall/releases)
@@ -12,7 +12,7 @@
 </div>
 
 > [!NOTE]
-> 当前版本 **2.0.1**（正式版），要求 Class Widgets 2 的插件 API `~=0.6.0`。
+> 当前版本 **2.1.0**（正式版），要求 Class Widgets 2 的插件 API `~=0.6.0`。
 > 在 [插件广场](https://plaza.cw.rinlit.cn/plugins/com.rollcall) 可以一键安装/更新，也可以在 Release 页下载 `.cwplugin` 手动导入。
 
 ## 介绍
