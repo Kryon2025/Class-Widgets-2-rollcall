@@ -279,6 +279,5 @@ Window {
         target: backend
         function onRollRequested(count) { resultWin.startRoll(count) }
         function onStopRequested() { if (resultWin.rolling) resultWin.finish() }
-        function onCloseRequested() { resultWin.dismiss() }
     }
 }

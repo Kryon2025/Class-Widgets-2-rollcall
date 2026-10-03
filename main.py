@@ -172,9 +172,6 @@ class Plugin(CW2Plugin):
     configChanged = Signal()
     rosterChanged = Signal()
     serviceChosen = Signal()
-    # 供自动化（com.kryon.automations）联动：点名出结果时广播、请求关闭结果窗口
-    picked = Signal(list)
-    closeRequested = Signal()
 
     def __init__(self, api: PluginAPI):
         super().__init__(api)
@@ -556,11 +553,6 @@ class Plugin(CW2Plugin):
         self.stopRequested.emit()
 
     @Slot()
-    def closeResult(self) -> None:
-        """关闭结果窗口（滚动中或已定格都能关）。供自动化调用。"""
-        self.closeRequested.emit()
-
-    @Slot()
     def hideButton(self) -> None:
         """隐藏悬浮按钮（右键菜单 / 点击后隐藏共用）。"""
         self.setWindowVisible(False)
@@ -831,11 +823,6 @@ class Plugin(CW2Plugin):
         if not names:
             self._notify("随机点名", "名单为空，请先导入名单")
             return
-        # 先广播给外部（自动化可据此触发），再播报
-        try:
-            self.picked.emit(list(names))
-        except Exception:
-            pass
         self._notify("随机点名", "、".join(names))
 
     def _get_notify_provider(self):
