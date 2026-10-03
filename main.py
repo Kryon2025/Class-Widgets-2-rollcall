@@ -1162,6 +1162,16 @@ class Plugin(CW2Plugin):
         self._save_pos()
 
     @Slot()
+    def closeResult(self) -> None:
+        """关闭点名结果窗口，不影响按钮与其它窗口。
+
+        供其它插件调用（如自动化的「关闭点名窗口」行动）。
+        """
+        res = self._find_window("resultWin")
+        if res is not None:
+            res.setVisible(False)
+
+    @Slot()
     def resetWindowPos(self):
         """把点名按钮重置回桌面中心（结果窗口一并回到默认位置）。"""
         self._pos = self._default_pos()
