@@ -12,7 +12,7 @@
 </div>
 
 > [!NOTE]
-> 当前版本 **2.0.2**（正式版），要求 Class Widgets 2 的插件 API `~=0.6.0`。
+> 当前版本 **2.0.2**（正式版），要求 Class Widgets 2 的插件 API `~=0.7.0`。
 > 在 [插件广场](https://plaza.cw.rinlit.cn/plugins/com.rollcall) 可以一键安装/更新，也可以在 Release 页下载 `.cwplugin` 手动导入。
 
 ## 介绍
@@ -184,3 +184,13 @@ configs/plugins/com.rollcall/
 - 本项目按现状提供，不承诺长期维护或持续修复缺陷 —— MIT 正文本身即已免除担保责任。
 
 The project is licensed under the MIT License, Copyright (c) 2026 Kryon. See [LICENSE](LICENSE) for the full license text and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for third-party notices.
+
+
+## SDK 版本
+
+插件适配 Class Widgets 2 SDK **0.7.0**，`cwplugin.json` 中 `api_version` 为 `~=0.7.0`
+（PEP 440 兼容版本号，等价于 `>=0.7.0, <0.8.0`），基于官方 `ClassWidgets.SDK` 接口
+（`CW2Plugin` / `PluginAPI`）。
+
+0.7.0 相对 0.6.0 是纯增量：新增 `globalconfig`（锁/解锁）、`actions`、`schedulemanagement`、
+`application`、`diagnostics` 等接口与 UI 快捷键能力，原有接口无破坏性变更。
